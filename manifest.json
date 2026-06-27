@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Regulations.gov Commenter Names",
+  "version": "1.0.0",
+  "description": "Shows the commenting organization or person's name directly on regulations.gov comment list (overview) pages.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://api.regulations.gov/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.regulations.gov/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_popup": "options.html",
+    "default_title": "Regulations.gov Commenter Names — set API key"
+  }
+}
