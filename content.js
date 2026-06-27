@@ -141,7 +141,7 @@ function processCards() {
   const anchors = document.querySelectorAll('a[href*="/comment/"]');
   anchors.forEach((a) => {
     if (a.dataset[PROCESSED]) return;
-    if (a.closest("#rgcn-drawer")) return; // skip links inside our own filter panel
+    if (a.closest("#rgcn-results")) return; // skip our own injected result cards
     const id = extractId(a.getAttribute("href"));
     if (!id) return;
     a.dataset[PROCESSED] = "1";
@@ -201,11 +201,11 @@ const state = {
   total: 0, // number of comments enumerated for the docket
   truncated: false, // docket exceeded the 5,000-comment API cap
   loading: false,
+  progressText: "", // transient status while loading the docket
   filterType: "all", // all | org | person | anon
   filterDoc: "all", // all | has | none
 };
 
-let drawerEls = null; // { drawer, statusEl, listEl }
 let sidebarEls = null; // { countEl }
 
 function hasDoc(c) {
@@ -222,17 +222,29 @@ function matchesFilter(c) {
   return true;
 }
 
-// Write a transient status line to both the drawer and the sidebar count slot.
-function setProgress(text) {
-  if (drawerEls) drawerEls.statusEl.textContent = text;
-  if (sidebarEls) sidebarEls.countEl.textContent = text;
+function isFilterActive() {
+  return state.filterType !== "all" || state.filterDoc !== "all";
+}
+
+function summaryText() {
+  if (state.loading) return state.progressText || "Loading…";
+  if (!state.comments) return state.progressText || "";
+  const loaded = state.comments.filter((c) => !c.error);
+  const matches = loaded.filter(matchesFilter);
+  const failed = state.total - loaded.length;
+  return (
+    `${matches.length} match · ${loaded.length}/${state.total} loaded` +
+    (failed > 0 ? ` · ${failed} failed` : "") +
+    (state.truncated ? " · capped at 5,000" : "")
+  );
 }
 
 function retryFailed() {
   if (!state.comments) return;
   const failedIds = state.comments.filter((c) => c.error).map((c) => c.id);
   if (!failedIds.length) return;
-  setProgress(`Retrying ${failedIds.length} failed…`);
+  state.progressText = `Retrying ${failedIds.length} failed…`;
+  if (sidebarEls) sidebarEls.countEl.textContent = state.progressText;
   let done = 0;
   failedIds.forEach((id) => {
     chrome.runtime.sendMessage({ type: "getCommenter", id }, (res) => {
@@ -240,95 +252,186 @@ function retryFailed() {
       if (idx >= 0) {
         state.comments[idx] = res && res.ok ? { id, ...res } : { id, error: (res && res.error) || "fail" };
       }
-      if (++done === failedIds.length) renderResults();
+      if (++done === failedIds.length) {
+        state.progressText = "";
+        renderMain();
+      }
     });
   });
 }
 
-// Render the drawer list and refresh the sidebar count from current state.
-function renderResults() {
-  const summary = (() => {
-    if (!state.comments) return state.loading ? "Loading…" : "";
-    const loaded = state.comments.filter((c) => !c.error);
-    const matches = loaded.filter(matchesFilter);
-    const failed = state.total - loaded.length;
-    return (
-      `${matches.length} match · ${loaded.length}/${state.total} loaded` +
-      (failed > 0 ? ` · ${failed} failed` : "") +
-      (state.truncated ? " · capped at 5,000" : "")
-    );
-  })();
+// --- Rendering filtered cards into the main column ---------------------------
 
-  if (sidebarEls) sidebarEls.countEl.textContent = summary;
+// Build a card that reuses the site's own card classes, so the existing
+// stylesheet renders it identically to a native comment card.
+function buildCard(c) {
+  const card = document.createElement("div");
+  card.className = "card card-type-comment";
+  card.style.marginBottom = "12px";
+  const block = document.createElement("div");
+  block.className = "card-block";
 
-  if (!drawerEls) return;
-  const { statusEl, listEl } = drawerEls;
-  listEl.innerHTML = "";
-  statusEl.innerHTML = "";
-  if (state.loading || !state.comments) {
-    statusEl.textContent = summary;
+  const sub = document.createElement("p");
+  sub.className = "card-subtitle d-inline-block";
+  sub.textContent = "Public Submission";
+  block.appendChild(sub);
+
+  const h = document.createElement("h3");
+  h.className = "h4 card-title";
+  const icon = document.createElement("span");
+  icon.textContent = c.kind === "org" ? "🏢 " : c.kind === "person" ? "👤 " : "";
+  const a = document.createElement("a");
+  a.href = `https://www.regulations.gov/comment/${c.id}`;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.textContent = c.name || "(no name provided)";
+  h.append(icon, a);
+  block.appendChild(h);
+
+  if (hasDoc(c)) {
+    const docLine = document.createElement("div");
+    docLine.style.cssText = "margin:4px 0";
+    c.attachments.forEach((att, i) => {
+      const link = document.createElement("a");
+      link.href = att.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.style.cssText = "color:#005ea2";
+      link.textContent = `📎 ${att.title}${att.format ? ` (${att.format})` : ""}`;
+      docLine.appendChild(link);
+      if (i < c.attachments.length - 1) docLine.appendChild(document.createTextNode(" · "));
+    });
+    block.appendChild(docLine);
+  } else {
+    const ctext = cleanText(c.text || "");
+    if (ctext) {
+      const t = document.createElement("div");
+      t.style.cssText = "margin:4px 0;color:#3d3d3d";
+      t.textContent = truncate(ctext);
+      block.appendChild(t);
+    }
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "card-metadata";
+  meta.style.cssText = "margin-top:4px;font-size:12px;color:#71767a";
+  meta.textContent = `ID ${c.id}`;
+  block.appendChild(meta);
+
+  card.appendChild(block);
+  return card;
+}
+
+function infoCard(text) {
+  const card = document.createElement("div");
+  card.className = "card card-type-comment";
+  card.style.marginBottom = "12px";
+  const block = document.createElement("div");
+  block.className = "card-block";
+  block.style.color = "#4a4a4a";
+  block.textContent = text;
+  card.appendChild(block);
+  return card;
+}
+
+// The native comment list is a `.row` inside `.results-container`; locate it
+// excluding our own injected results.
+function nativeCardsRow() {
+  const rc = document.querySelector(".results-container");
+  if (!rc) return null;
+  const card = [...rc.querySelectorAll(".card-type-comment")].find((c) => !c.closest("#rgcn-results"));
+  return card ? card.closest(".row") : null;
+}
+
+function resetFilters() {
+  state.filterType = "all";
+  state.filterDoc = "all";
+  const t = document.getElementById("rgcn-f-type");
+  const d = document.getElementById("rgcn-f-doc");
+  if (t) t.value = "all";
+  if (d) d.value = "all";
+  renderMain();
+}
+
+// When a filter is active, hide the native list/pager and render the filtered
+// full-docket matches in their place; otherwise restore the native list.
+function renderMain() {
+  if (sidebarEls) sidebarEls.countEl.textContent = summaryText();
+
+  const rc = document.querySelector(".results-container");
+  if (!rc) return;
+  const cardsRow = nativeCardsRow();
+  const pagerRow = rc.querySelector(".pagination-container");
+  let mine = document.getElementById("rgcn-results");
+
+  if (!isFilterActive()) {
+    if (mine) mine.remove();
+    if (cardsRow) cardsRow.style.display = "";
+    if (pagerRow) pagerRow.style.display = "";
     return;
   }
 
-  const loaded = state.comments.filter((c) => !c.error);
-  const matches = loaded.filter(matchesFilter);
-  const failed = state.total - loaded.length;
+  if (!state.comments && !state.loading) loadDocket();
+  if (cardsRow) cardsRow.style.display = "none";
+  if (pagerRow) pagerRow.style.display = "none";
 
-  const span = document.createElement("span");
-  span.textContent = summary;
-  statusEl.appendChild(span);
-  if (failed > 0) {
+  if (!mine) {
+    mine = document.createElement("div");
+    mine.id = "rgcn-results";
+    mine.className = "row";
+    rc.insertBefore(mine, cardsRow || pagerRow || null);
+  }
+  mine.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.className = "col-md-12";
+  mine.appendChild(wrap);
+
+  // Summary bar: count, clear-filters, and a retry if any loads failed.
+  const bar = document.createElement("div");
+  bar.style.cssText =
+    "padding:6px 0 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px";
+  const label = document.createElement("strong");
+  label.textContent = summaryText() || "Loading…";
+  bar.appendChild(label);
+  const clear = document.createElement("a");
+  clear.href = "#";
+  clear.textContent = "Clear filters";
+  clear.style.cssText = "color:#005ea2;font-size:12px";
+  clear.addEventListener("click", (e) => {
+    e.preventDefault();
+    resetFilters();
+  });
+  bar.appendChild(clear);
+  const loaded = state.comments ? state.comments.filter((c) => !c.error) : [];
+  if (state.comments && state.total - loaded.length > 0) {
     const retry = document.createElement("button");
     retry.textContent = "Retry failed";
     retry.style.cssText =
-      "margin-left:8px;padding:3px 8px;font-size:11px;font-weight:600;color:#fff;background:#005ea2;border:none;border-radius:5px;cursor:pointer";
+      "padding:3px 8px;font-size:11px;font-weight:600;color:#fff;background:#005ea2;border:none;border-radius:5px;cursor:pointer";
     retry.addEventListener("click", retryFailed);
-    statusEl.appendChild(retry);
+    bar.appendChild(retry);
   }
+  wrap.appendChild(bar);
 
-  matches.forEach((c) => {
-    const item = document.createElement("div");
-    item.style.cssText = "padding:8px 4px;border-bottom:1px solid #f0f0f0;font-size:12.5px";
+  if (!state.comments) {
+    wrap.appendChild(infoCard(state.progressText || "Loading all comments…"));
+    return;
+  }
+  const matches = loaded.filter(matchesFilter);
+  if (!matches.length) {
+    wrap.appendChild(infoCard("No comments match these filters."));
+    return;
+  }
+  matches.forEach((c) => wrap.appendChild(buildCard(c)));
+}
 
-    const nameLine = document.createElement("div");
-    nameLine.style.cssText = "font-weight:600;display:flex;gap:5px";
-    const tag = document.createElement("span");
-    tag.textContent = c.kind === "org" ? "🏢" : c.kind === "person" ? "👤" : "•";
-    const link = document.createElement("a");
-    link.href = `https://www.regulations.gov/comment/${c.id}`;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.style.cssText = "color:#005ea2;text-decoration:none";
-    link.textContent = c.name || "(no name)";
-    nameLine.append(tag, link);
-    item.appendChild(nameLine);
-
-    if (hasDoc(c)) {
-      const docLine = document.createElement("div");
-      docLine.style.cssText = "margin-top:2px";
-      c.attachments.forEach((att, i) => {
-        const a = document.createElement("a");
-        a.href = att.url;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        a.style.cssText = "color:#005ea2";
-        a.textContent = `📎 ${att.title}${att.format ? ` (${att.format})` : ""}`;
-        docLine.appendChild(a);
-        if (i < c.attachments.length - 1) docLine.appendChild(document.createTextNode(" · "));
-      });
-      item.appendChild(docLine);
-    } else {
-      const ctext = cleanText(c.text || "");
-      if (ctext) {
-        const t = document.createElement("div");
-        t.style.cssText = "margin-top:2px;color:#3d3d3d";
-        t.title = ctext;
-        t.textContent = truncate(ctext);
-        item.appendChild(t);
-      }
-    }
-    listEl.appendChild(item);
-  });
+// Re-apply the takeover only if Ember disturbed it (avoids render loops from the
+// mutation observer when nothing changed).
+function reapplyIfNeeded() {
+  if (!isFilterActive()) return;
+  const mine = document.getElementById("rgcn-results");
+  const cardsRow = nativeCardsRow();
+  if (!mine || (cardsRow && cardsRow.style.display !== "none")) renderMain();
 }
 
 function loadDocket() {
@@ -336,85 +439,40 @@ function loadDocket() {
   const docId = currentDocId();
   if (!docId) return;
   state.loading = true;
-  setProgress("Resolving docket…");
+  state.progressText = "Resolving docket…";
+  renderMain();
 
   const port = chrome.runtime.connect({ name: "docket" });
   port.onMessage.addListener((m) => {
     if (m.type === "status" && m.phase === "enumerating") {
-      setProgress("Finding all comments…");
+      state.progressText = "Finding all comments…";
     } else if (m.type === "progress") {
-      setProgress(`Loading comments… ${m.loaded}/${m.total}`);
+      state.progressText = `Loading comments… ${m.loaded}/${m.total}`;
     } else if (m.type === "done") {
       state.loading = false;
+      state.progressText = "";
       state.comments = m.comments; // keep errored entries so we can report + retry them
       state.total = m.comments.length;
       state.truncated = !!m.truncated;
-      renderResults();
     } else if (m.type === "error") {
       state.loading = false;
       const map = {
-        "no-key": "Set an API key (extension icon), then reload.",
+        "no-key": "Set an API key (click the extension icon), then reload.",
         "rate-limit": "API rate limit hit — try again shortly.",
         "bad-key": "Invalid API key.",
       };
-      setProgress(map[m.error] || `Error: ${m.error}`);
+      state.progressText = map[m.error] || `Error: ${m.error}`;
     }
+    renderMain();
   });
   port.onDisconnect.addListener(() => {
     if (state.loading) {
       state.loading = false;
-      setProgress("Connection interrupted — try again.");
+      state.progressText = "Connection interrupted — change a filter to retry.";
+      renderMain();
     }
   });
   port.postMessage({ docId });
-}
-
-// --- Results drawer (built once, lives under <body>) -------------------------
-
-function buildDrawer() {
-  if (drawerEls) return;
-  const drawer = document.createElement("div");
-  drawer.id = "rgcn-drawer";
-  drawer.style.cssText = [
-    "position:fixed",
-    "top:0",
-    "right:0",
-    "width:360px",
-    "max-width:92vw",
-    "height:100vh",
-    "z-index:2147483647",
-    "background:#fff",
-    "box-shadow:-2px 0 12px rgba(0,0,0,.2)",
-    "display:none",
-    "flex-direction:column",
-    "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
-    "color:#1b1b1b",
-  ].join(";");
-  drawer.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #e0e0e0">
-      <strong style="font-size:14px">Matching comments</strong>
-      <button id="rgcn-close" style="border:none;background:none;font-size:18px;cursor:pointer;line-height:1">✕</button>
-    </div>
-    <div id="rgcn-status" style="padding:10px 14px;font-size:12px;color:#4a4a4a;border-bottom:1px solid #e0e0e0"></div>
-    <div id="rgcn-list" style="flex:1;overflow:auto;padding:6px 10px"></div>
-  `;
-  document.body.appendChild(drawer);
-  drawer.querySelector("#rgcn-close").addEventListener("click", closeDrawer);
-  drawerEls = {
-    drawer,
-    statusEl: drawer.querySelector("#rgcn-status"),
-    listEl: drawer.querySelector("#rgcn-list"),
-  };
-}
-
-function openDrawer() {
-  buildDrawer();
-  drawerEls.drawer.style.display = "flex";
-  loadDocket();
-  renderResults();
-}
-function closeDrawer() {
-  if (drawerEls) drawerEls.drawer.style.display = "none";
 }
 
 // --- Sidebar controls (injected into the native "Refine Results" panel) ------
@@ -442,13 +500,13 @@ function ensureSidebar() {
   section.id = "rgcn-refine-section";
   section.style.cssText = "border-top:1px solid #dfe1e2;padding:14px 0 6px;margin-top:8px";
   section.innerHTML = `
-    <div style="font-weight:700;font-size:15px;margin-bottom:10px">Commenter <span style="font-weight:400;font-size:11px;color:#71767a">(extension)</span></div>
+    <div style="font-weight:700;font-size:15px;margin-bottom:4px">Commenter <span style="font-weight:400;font-size:11px;color:#71767a">(extension)</span></div>
+    <div style="font-size:11px;color:#71767a;margin-bottom:10px">Filters the full docket in the list at right.</div>
     <label style="display:block;font-size:13px;font-weight:600;margin:0 0 4px">Submitter type</label>
     <select id="rgcn-f-type"></select>
     <label style="display:block;font-size:13px;font-weight:600;margin:12px 0 4px">Submission format</label>
     <select id="rgcn-f-doc"></select>
-    <button id="rgcn-show" style="margin-top:12px;width:100%;padding:8px;font-size:13px;font-weight:600;color:#fff;background:#005ea2;border:none;cursor:pointer">Show matching comments →</button>
-    <div id="rgcn-count" style="font-size:12px;color:#4a4a4a;margin-top:8px;min-height:15px"></div>
+    <div id="rgcn-count" style="font-size:12px;color:#4a4a4a;margin-top:10px;min-height:15px"></div>
   `;
   panel.appendChild(section);
 
@@ -472,20 +530,21 @@ function ensureSidebar() {
 
   typeSel.addEventListener("change", () => {
     state.filterType = typeSel.value;
-    renderResults();
+    renderMain();
   });
   docSel.addEventListener("change", () => {
     state.filterDoc = docSel.value;
-    renderResults();
+    renderMain();
   });
-  section.querySelector("#rgcn-show").addEventListener("click", openDrawer);
 
-  renderResults(); // reflect any already-loaded data in the fresh count slot
+  // Reflect current state in the freshly injected controls/count.
+  renderMain();
 }
 
 // (Re)inject on navigation; the debounced observer (schedule) also calls this.
 function ensurePanel() {
   if (!currentDocId()) return;
   ensureSidebar();
+  reapplyIfNeeded();
 }
 ensurePanel();

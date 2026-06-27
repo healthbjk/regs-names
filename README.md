@@ -59,19 +59,18 @@ section with two filters:
 - **Submitter type** — organizations / individuals / anonymous
 - **Submission format** — has a document / inline text only
 
-Click **Show matching comments →** to load every comment in the docket once and
-open a results drawer listing the matches (each links to the comment and its
-document). After loading, changing either filter updates the count and the
-drawer instantly — no further fetching.
+Choosing anything other than "All" **filters the main comment list in place**:
+the native (25-per-page) list and pager are hidden, the whole docket is loaded
+once, and the matching comments render as cards in the same column — each titled
+with the commenter's name and linking to the comment and its document. A summary
+bar shows `<matches> match · <loaded>/<total> loaded` with **Clear filters** and,
+if any loads were rate-limited, **Retry failed**. Set both filters back to "All"
+to restore the native list.
 
-The filters live in Refine Results (rather than a separate panel) so there's a
-single, obvious place to filter. Loading is opt-in/click-triggered because the
-site paginates 25/page server-side and the API has no organization/attachment
-facet, so the drawer must fetch every comment's detail once (uses API quota;
-results are cached 30 days, so subsequent opens are fast). The status line shows
-`<matches> match · <loaded>/<total> loaded`, with a **Retry failed** button if
-any requests were rate-limited. Dockets over 5,000 comments are capped at the
-first 5,000 (API limit).
+Filtering happens client-side because the site paginates 25/page server-side and
+the API has no organization/attachment facet, so the extension fetches every
+comment's detail once (uses API quota; cached 30 days, so later filtering is
+instant). Dockets over 5,000 comments are capped at the first 5,000 (API limit).
 
 ## How it works
 
