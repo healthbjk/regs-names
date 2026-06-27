@@ -17,6 +17,17 @@ function truncate(s) {
   return s.length > MAX_TEXT ? s.slice(0, MAX_TEXT).trimEnd() + "…" : s;
 }
 
+// Comment bodies come back with literal HTML (e.g. <br/>, &quot;). Decode
+// entities and strip tags for a clean text preview. DOMParser documents are
+// inert — no scripts run and no resources load — so this is safe for untrusted
+// content.
+function cleanText(s) {
+  if (!s) return "";
+  const html = s.replace(/<br\s*\/?>/gi, " ");
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
+}
+
 // A row holds the name line and a body line (document link[s] or comment text).
 function makeRow() {
   const row = document.createElement("div");
@@ -80,7 +91,7 @@ function renderBody(bodyEl, res) {
     return;
   }
 
-  const text = (res.text || "").trim();
+  const text = cleanText(res.text || "");
   if (text) {
     bodyEl.style.color = "#3d3d3d";
     bodyEl.title = text;
@@ -185,7 +196,9 @@ function currentDocId() {
 }
 
 const state = {
-  comments: null, // loaded comment array, or null until loaded
+  comments: null, // full comment array (incl. errored entries), or null until loaded
+  total: 0, // number of comments enumerated for the docket
+  truncated: false, // docket exceeded the 5,000-comment API cap
   loading: false,
   filterType: "all", // all | org | person | anon
   filterDoc: "all", // all | has | none
@@ -287,11 +300,49 @@ function buildPanel() {
   const statusEl = drawer.querySelector("#rgcn-status");
   const listEl = drawer.querySelector("#rgcn-list");
 
+  function retryFailed() {
+    const failedIds = state.comments.filter((c) => c.error).map((c) => c.id);
+    if (!failedIds.length) return;
+    const span = statusEl.querySelector("span");
+    if (span) span.textContent = `Retrying ${failedIds.length} failed…`;
+    let done = 0;
+    failedIds.forEach((id) => {
+      chrome.runtime.sendMessage({ type: "getCommenter", id }, (res) => {
+        const idx = state.comments.findIndex((c) => c.id === id);
+        if (idx >= 0) {
+          state.comments[idx] = res && res.ok ? { id, ...res } : { id, error: (res && res.error) || "fail" };
+        }
+        if (++done === failedIds.length) renderList();
+      });
+    });
+  }
+
   function renderList() {
     listEl.innerHTML = "";
+    statusEl.innerHTML = "";
     if (state.loading || !state.comments) return;
-    const matches = state.comments.filter(matchesFilter);
-    statusEl.textContent = `${matches.length} of ${state.comments.length} comments match`;
+
+    const loaded = state.comments.filter((c) => !c.error);
+    const matches = loaded.filter(matchesFilter);
+    const total = state.total || state.comments.length;
+    const failed = total - loaded.length;
+
+    const span = document.createElement("span");
+    span.textContent =
+      `${matches.length} match · ${loaded.length}/${total} loaded` +
+      (failed > 0 ? ` · ${failed} failed` : "") +
+      (state.truncated ? " · docket capped at 5,000" : "");
+    statusEl.appendChild(span);
+
+    if (failed > 0) {
+      const retry = document.createElement("button");
+      retry.textContent = "Retry failed";
+      retry.style.cssText =
+        "margin-left:8px;padding:3px 8px;font-size:11px;font-weight:600;color:#fff;background:#005ea2;border:none;border-radius:5px;cursor:pointer";
+      retry.addEventListener("click", retryFailed);
+      statusEl.appendChild(retry);
+    }
+
     matches.forEach((c) => {
       const item = document.createElement("div");
       item.style.cssText = "padding:8px 4px;border-bottom:1px solid #f0f0f0;font-size:12.5px";
@@ -323,12 +374,15 @@ function buildPanel() {
           if (i < c.attachments.length - 1) docLine.appendChild(document.createTextNode(" · "));
         });
         item.appendChild(docLine);
-      } else if (c.text) {
-        const t = document.createElement("div");
-        t.style.cssText = "margin-top:2px;color:#3d3d3d";
-        t.title = c.text;
-        t.textContent = truncate(c.text);
-        item.appendChild(t);
+      } else {
+        const ctext = cleanText(c.text || "");
+        if (ctext) {
+          const t = document.createElement("div");
+          t.style.cssText = "margin-top:2px;color:#3d3d3d";
+          t.title = ctext;
+          t.textContent = truncate(ctext);
+          item.appendChild(t);
+        }
       }
       listEl.appendChild(item);
     });
@@ -347,10 +401,9 @@ function buildPanel() {
         statusEl.textContent = `Loading comments… ${m.loaded}/${m.total}`;
       } else if (m.type === "done") {
         state.loading = false;
-        state.comments = m.comments.filter((c) => !c.error);
-        if (m.truncated) {
-          statusEl.textContent = "Note: docket exceeds 5,000 comments; showing first 5,000.";
-        }
+        state.comments = m.comments; // keep errored entries so we can report + retry them
+        state.total = m.comments.length;
+        state.truncated = !!m.truncated;
         renderList();
       } else if (m.type === "error") {
         state.loading = false;

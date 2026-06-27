@@ -31,6 +31,26 @@ function enqueue(fn) {
   });
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Fetch with exponential backoff on HTTP 429, so a burst of detail requests
+// (e.g. loading a whole docket) rides out short-term rate limits instead of
+// dropping comments. Returns { netErr } or { res }.
+async function fetchWithRetry(url, headers, attempts = 4) {
+  let delay = 700;
+  for (let i = 0; i < attempts; i++) {
+    let res;
+    try {
+      res = await fetch(url, { headers });
+    } catch (e) {
+      return { netErr: true };
+    }
+    if (res.status !== 429 || i === attempts - 1) return { res };
+    await sleep(delay);
+    delay = Math.round(delay * 2.2);
+  }
+}
+
 async function getApiKey() {
   const { apiKey } = await chrome.storage.sync.get("apiKey");
   return (apiKey || "").trim();
@@ -102,12 +122,9 @@ async function fetchCommenter(id) {
     `${API_BASE}${encodeURIComponent(id)}` +
     `?include=attachments&api_key=${encodeURIComponent(apiKey)}`;
 
-  let res;
-  try {
-    res = await fetch(url, { headers: { Accept: "application/vnd.api+json" } });
-  } catch (e) {
-    return { ok: false, error: "network" };
-  }
+  const attempt = await fetchWithRetry(url, { Accept: "application/vnd.api+json" });
+  if (attempt.netErr) return { ok: false, error: "network" };
+  const res = attempt.res;
 
   if (res.status === 429) return { ok: false, error: "rate-limit" };
   if (res.status === 403) return { ok: false, error: "bad-key" };
@@ -198,12 +215,9 @@ async function captureKey(key) {
 // ---------------------------------------------------------------------------
 
 async function apiGetJson(url) {
-  let res;
-  try {
-    res = await fetch(url, { headers: { Accept: "application/vnd.api+json" } });
-  } catch (e) {
-    return { ok: false, error: "network" };
-  }
+  const attempt = await fetchWithRetry(url, { Accept: "application/vnd.api+json" });
+  if (attempt.netErr) return { ok: false, error: "network" };
+  const res = attempt.res;
   if (res.status === 429) return { ok: false, error: "rate-limit" };
   if (res.status === 403) return { ok: false, error: "bad-key" };
   if (!res.ok) return { ok: false, error: `http-${res.status}` };
@@ -229,7 +243,7 @@ async function resolveObjectId(docId, apiKey) {
 async function enumerateCommentIds(objectId, apiKey) {
   const ids = [];
   let page = 1;
-  let pageCount = 1;
+  let hasNext = false;
   do {
     const url =
       `https://api.regulations.gov/v4/comments?filter[commentOnId]=${encodeURIComponent(objectId)}` +
@@ -238,10 +252,18 @@ async function enumerateCommentIds(objectId, apiKey) {
     if (!r.ok) return r;
     const data = r.json && Array.isArray(r.json.data) ? r.json.data : [];
     for (const d of data) if (d && d.id) ids.push(d.id);
-    pageCount = (r.json && r.json.meta && r.json.meta.pageCount) || 1;
+
+    // v4 exposes meta.hasNextPage; fall back to totalPages, or to a full-page
+    // heuristic if neither field is present. (The earlier meta.pageCount field
+    // didn't exist, so the loop stopped after page 1.)
+    const meta = (r.json && r.json.meta) || {};
+    hasNext =
+      meta.hasNextPage === true ||
+      (typeof meta.totalPages === "number" && page < meta.totalPages) ||
+      data.length >= 250;
     page++;
-  } while (page <= pageCount && page <= 20); // API caps page[number] at 20 (5000 comments)
-  return { ok: true, ids, truncated: pageCount > 20 };
+  } while (hasNext && page <= 20); // API caps page[number] at 20 (5000 comments)
+  return { ok: true, ids, truncated: hasNext && page > 20 };
 }
 
 chrome.runtime.onConnect.addListener((port) => {
