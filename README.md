@@ -53,18 +53,25 @@ Below the name, each card also shows the substance of the submission:
 
 ### Filter the whole docket
 
-A floating **🔎 Filter all comments** button (bottom-right of any comment list
-page) opens a drawer that loads every comment in the docket once and lets you
-filter the full set by:
+The site's own **Refine Results** panel (left sidebar) gains a **Commenter**
+section with two filters:
 
 - **Submitter type** — organizations / individuals / anonymous
 - **Submission format** — has a document / inline text only
 
-Matching comments are listed with a link to each comment and its document. This
-is opt-in because the site paginates 25/page server-side and the API has no
-organization/attachment facet, so the drawer must fetch every comment's detail
-once (uses API quota; results are cached 30 days, so subsequent opens are fast).
-Dockets over 5,000 comments are capped at the first 5,000 (API limit).
+Click **Show matching comments →** to load every comment in the docket once and
+open a results drawer listing the matches (each links to the comment and its
+document). After loading, changing either filter updates the count and the
+drawer instantly — no further fetching.
+
+The filters live in Refine Results (rather than a separate panel) so there's a
+single, obvious place to filter. Loading is opt-in/click-triggered because the
+site paginates 25/page server-side and the API has no organization/attachment
+facet, so the drawer must fetch every comment's detail once (uses API quota;
+results are cached 30 days, so subsequent opens are fast). The status line shows
+`<matches> match · <loaded>/<total> loaded`, with a **Retry failed** button if
+any requests were rate-limited. Dockets over 5,000 comments are capped at the
+first 5,000 (API limit).
 
 ## How it works
 

@@ -180,12 +180,13 @@ observer.observe(document.documentElement, { childList: true, subtree: true });
 processCards();
 
 // ===========================================================================
-// Whole-docket filter panel.
+// Whole-docket filtering.
 //
-// A floating launcher injects a drawer that loads every comment in the docket
-// once (via the background Port) and lets you filter the full set by submitter
-// type and whether the submission is a document. Lives in its own DOM subtree
-// appended to <body> so the Ember SPA's re-renders don't wipe it.
+// The filter *controls* live inside the site's native "Refine Results" panel
+// (so there's one obvious place to filter), and they drive a results drawer
+// that loads every comment in the docket once via the background Port. The
+// drawer lives under <body> so the Ember SPA's re-renders don't wipe it; the
+// sidebar section is re-injected whenever Ember repaints the panel.
 // ===========================================================================
 
 const DOC_RE = /\/document\/([^/]+)\/comment/;
@@ -204,6 +205,9 @@ const state = {
   filterDoc: "all", // all | has | none
 };
 
+let drawerEls = null; // { drawer, statusEl, listEl }
+let sidebarEls = null; // { countEl }
+
 function hasDoc(c) {
   return Array.isArray(c.attachments) && c.attachments.length > 0;
 }
@@ -218,37 +222,157 @@ function matchesFilter(c) {
   return true;
 }
 
-function styleSelect(el) {
-  el.style.cssText =
-    "padding:5px 6px;font-size:12px;border:1px solid #ccc;border-radius:6px;background:#fff;width:100%";
+// Write a transient status line to both the drawer and the sidebar count slot.
+function setProgress(text) {
+  if (drawerEls) drawerEls.statusEl.textContent = text;
+  if (sidebarEls) sidebarEls.countEl.textContent = text;
 }
 
-function buildPanel() {
-  if (document.getElementById("rgcn-launcher")) return; // already injected
+function retryFailed() {
+  if (!state.comments) return;
+  const failedIds = state.comments.filter((c) => c.error).map((c) => c.id);
+  if (!failedIds.length) return;
+  setProgress(`Retrying ${failedIds.length} failed…`);
+  let done = 0;
+  failedIds.forEach((id) => {
+    chrome.runtime.sendMessage({ type: "getCommenter", id }, (res) => {
+      const idx = state.comments.findIndex((c) => c.id === id);
+      if (idx >= 0) {
+        state.comments[idx] = res && res.ok ? { id, ...res } : { id, error: (res && res.error) || "fail" };
+      }
+      if (++done === failedIds.length) renderResults();
+    });
+  });
+}
+
+// Render the drawer list and refresh the sidebar count from current state.
+function renderResults() {
+  const summary = (() => {
+    if (!state.comments) return state.loading ? "Loading…" : "";
+    const loaded = state.comments.filter((c) => !c.error);
+    const matches = loaded.filter(matchesFilter);
+    const failed = state.total - loaded.length;
+    return (
+      `${matches.length} match · ${loaded.length}/${state.total} loaded` +
+      (failed > 0 ? ` · ${failed} failed` : "") +
+      (state.truncated ? " · capped at 5,000" : "")
+    );
+  })();
+
+  if (sidebarEls) sidebarEls.countEl.textContent = summary;
+
+  if (!drawerEls) return;
+  const { statusEl, listEl } = drawerEls;
+  listEl.innerHTML = "";
+  statusEl.innerHTML = "";
+  if (state.loading || !state.comments) {
+    statusEl.textContent = summary;
+    return;
+  }
+
+  const loaded = state.comments.filter((c) => !c.error);
+  const matches = loaded.filter(matchesFilter);
+  const failed = state.total - loaded.length;
+
+  const span = document.createElement("span");
+  span.textContent = summary;
+  statusEl.appendChild(span);
+  if (failed > 0) {
+    const retry = document.createElement("button");
+    retry.textContent = "Retry failed";
+    retry.style.cssText =
+      "margin-left:8px;padding:3px 8px;font-size:11px;font-weight:600;color:#fff;background:#005ea2;border:none;border-radius:5px;cursor:pointer";
+    retry.addEventListener("click", retryFailed);
+    statusEl.appendChild(retry);
+  }
+
+  matches.forEach((c) => {
+    const item = document.createElement("div");
+    item.style.cssText = "padding:8px 4px;border-bottom:1px solid #f0f0f0;font-size:12.5px";
+
+    const nameLine = document.createElement("div");
+    nameLine.style.cssText = "font-weight:600;display:flex;gap:5px";
+    const tag = document.createElement("span");
+    tag.textContent = c.kind === "org" ? "🏢" : c.kind === "person" ? "👤" : "•";
+    const link = document.createElement("a");
+    link.href = `https://www.regulations.gov/comment/${c.id}`;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.style.cssText = "color:#005ea2;text-decoration:none";
+    link.textContent = c.name || "(no name)";
+    nameLine.append(tag, link);
+    item.appendChild(nameLine);
+
+    if (hasDoc(c)) {
+      const docLine = document.createElement("div");
+      docLine.style.cssText = "margin-top:2px";
+      c.attachments.forEach((att, i) => {
+        const a = document.createElement("a");
+        a.href = att.url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.style.cssText = "color:#005ea2";
+        a.textContent = `📎 ${att.title}${att.format ? ` (${att.format})` : ""}`;
+        docLine.appendChild(a);
+        if (i < c.attachments.length - 1) docLine.appendChild(document.createTextNode(" · "));
+      });
+      item.appendChild(docLine);
+    } else {
+      const ctext = cleanText(c.text || "");
+      if (ctext) {
+        const t = document.createElement("div");
+        t.style.cssText = "margin-top:2px;color:#3d3d3d";
+        t.title = ctext;
+        t.textContent = truncate(ctext);
+        item.appendChild(t);
+      }
+    }
+    listEl.appendChild(item);
+  });
+}
+
+function loadDocket() {
+  if (state.loading || state.comments) return;
   const docId = currentDocId();
   if (!docId) return;
+  state.loading = true;
+  setProgress("Resolving docket…");
 
-  // Launcher button (bottom-right).
-  const launcher = document.createElement("button");
-  launcher.id = "rgcn-launcher";
-  launcher.textContent = "🔎 Filter all comments";
-  launcher.style.cssText = [
-    "position:fixed",
-    "right:18px",
-    "bottom:18px",
-    "z-index:2147483647",
-    "padding:10px 14px",
-    "font-size:13px",
-    "font-weight:600",
-    "color:#fff",
-    "background:#005ea2",
-    "border:none",
-    "border-radius:8px",
-    "box-shadow:0 2px 8px rgba(0,0,0,.25)",
-    "cursor:pointer",
-  ].join(";");
+  const port = chrome.runtime.connect({ name: "docket" });
+  port.onMessage.addListener((m) => {
+    if (m.type === "status" && m.phase === "enumerating") {
+      setProgress("Finding all comments…");
+    } else if (m.type === "progress") {
+      setProgress(`Loading comments… ${m.loaded}/${m.total}`);
+    } else if (m.type === "done") {
+      state.loading = false;
+      state.comments = m.comments; // keep errored entries so we can report + retry them
+      state.total = m.comments.length;
+      state.truncated = !!m.truncated;
+      renderResults();
+    } else if (m.type === "error") {
+      state.loading = false;
+      const map = {
+        "no-key": "Set an API key (extension icon), then reload.",
+        "rate-limit": "API rate limit hit — try again shortly.",
+        "bad-key": "Invalid API key.",
+      };
+      setProgress(map[m.error] || `Error: ${m.error}`);
+    }
+  });
+  port.onDisconnect.addListener(() => {
+    if (state.loading) {
+      state.loading = false;
+      setProgress("Connection interrupted — try again.");
+    }
+  });
+  port.postMessage({ docId });
+}
 
-  // Drawer.
+// --- Results drawer (built once, lives under <body>) -------------------------
+
+function buildDrawer() {
+  if (drawerEls) return;
   const drawer = document.createElement("div");
   drawer.id = "rgcn-drawer";
   drawer.style.cssText = [
@@ -266,189 +390,103 @@ function buildPanel() {
     "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
     "color:#1b1b1b",
   ].join(";");
-
   drawer.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #e0e0e0">
-      <strong style="font-size:14px">Filter all comments</strong>
+      <strong style="font-size:14px">Matching comments</strong>
       <button id="rgcn-close" style="border:none;background:none;font-size:18px;cursor:pointer;line-height:1">✕</button>
-    </div>
-    <div style="padding:12px 14px;border-bottom:1px solid #e0e0e0">
-      <label style="display:block;font-size:11px;font-weight:600;margin-bottom:3px">Submitter type</label>
-      <select id="rgcn-f-type">
-        <option value="all">All</option>
-        <option value="org">🏢 Organizations</option>
-        <option value="person">👤 Individuals</option>
-        <option value="anon">Anonymous / no name</option>
-      </select>
-      <label style="display:block;font-size:11px;font-weight:600;margin:10px 0 3px">Submission format</label>
-      <select id="rgcn-f-doc">
-        <option value="all">All</option>
-        <option value="has">📎 Has document</option>
-        <option value="none">Inline text only</option>
-      </select>
     </div>
     <div id="rgcn-status" style="padding:10px 14px;font-size:12px;color:#4a4a4a;border-bottom:1px solid #e0e0e0"></div>
     <div id="rgcn-list" style="flex:1;overflow:auto;padding:6px 10px"></div>
   `;
-
-  document.body.append(launcher, drawer);
-
-  const typeSel = drawer.querySelector("#rgcn-f-type");
-  const docSel = drawer.querySelector("#rgcn-f-doc");
-  styleSelect(typeSel);
-  styleSelect(docSel);
-  const statusEl = drawer.querySelector("#rgcn-status");
-  const listEl = drawer.querySelector("#rgcn-list");
-
-  function retryFailed() {
-    const failedIds = state.comments.filter((c) => c.error).map((c) => c.id);
-    if (!failedIds.length) return;
-    const span = statusEl.querySelector("span");
-    if (span) span.textContent = `Retrying ${failedIds.length} failed…`;
-    let done = 0;
-    failedIds.forEach((id) => {
-      chrome.runtime.sendMessage({ type: "getCommenter", id }, (res) => {
-        const idx = state.comments.findIndex((c) => c.id === id);
-        if (idx >= 0) {
-          state.comments[idx] = res && res.ok ? { id, ...res } : { id, error: (res && res.error) || "fail" };
-        }
-        if (++done === failedIds.length) renderList();
-      });
-    });
-  }
-
-  function renderList() {
-    listEl.innerHTML = "";
-    statusEl.innerHTML = "";
-    if (state.loading || !state.comments) return;
-
-    const loaded = state.comments.filter((c) => !c.error);
-    const matches = loaded.filter(matchesFilter);
-    const total = state.total || state.comments.length;
-    const failed = total - loaded.length;
-
-    const span = document.createElement("span");
-    span.textContent =
-      `${matches.length} match · ${loaded.length}/${total} loaded` +
-      (failed > 0 ? ` · ${failed} failed` : "") +
-      (state.truncated ? " · docket capped at 5,000" : "");
-    statusEl.appendChild(span);
-
-    if (failed > 0) {
-      const retry = document.createElement("button");
-      retry.textContent = "Retry failed";
-      retry.style.cssText =
-        "margin-left:8px;padding:3px 8px;font-size:11px;font-weight:600;color:#fff;background:#005ea2;border:none;border-radius:5px;cursor:pointer";
-      retry.addEventListener("click", retryFailed);
-      statusEl.appendChild(retry);
-    }
-
-    matches.forEach((c) => {
-      const item = document.createElement("div");
-      item.style.cssText = "padding:8px 4px;border-bottom:1px solid #f0f0f0;font-size:12.5px";
-
-      const nameLine = document.createElement("div");
-      nameLine.style.cssText = "font-weight:600;display:flex;gap:5px";
-      const tag = document.createElement("span");
-      tag.textContent = c.kind === "org" ? "🏢" : c.kind === "person" ? "👤" : "•";
-      const link = document.createElement("a");
-      link.href = `https://www.regulations.gov/comment/${c.id}`;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.style.cssText = "color:#005ea2;text-decoration:none";
-      link.textContent = c.name || "(no name)";
-      nameLine.append(tag, link);
-      item.appendChild(nameLine);
-
-      if (hasDoc(c)) {
-        const docLine = document.createElement("div");
-        docLine.style.cssText = "margin-top:2px";
-        c.attachments.forEach((att, i) => {
-          const a = document.createElement("a");
-          a.href = att.url;
-          a.target = "_blank";
-          a.rel = "noopener noreferrer";
-          a.style.cssText = "color:#005ea2";
-          a.textContent = `📎 ${att.title}${att.format ? ` (${att.format})` : ""}`;
-          docLine.appendChild(a);
-          if (i < c.attachments.length - 1) docLine.appendChild(document.createTextNode(" · "));
-        });
-        item.appendChild(docLine);
-      } else {
-        const ctext = cleanText(c.text || "");
-        if (ctext) {
-          const t = document.createElement("div");
-          t.style.cssText = "margin-top:2px;color:#3d3d3d";
-          t.title = ctext;
-          t.textContent = truncate(ctext);
-          item.appendChild(t);
-        }
-      }
-      listEl.appendChild(item);
-    });
-  }
-
-  function loadDocket() {
-    if (state.loading || state.comments) return;
-    state.loading = true;
-    statusEl.textContent = "Resolving docket…";
-
-    const port = chrome.runtime.connect({ name: "docket" });
-    port.onMessage.addListener((m) => {
-      if (m.type === "status" && m.phase === "enumerating") {
-        statusEl.textContent = "Finding all comments…";
-      } else if (m.type === "progress") {
-        statusEl.textContent = `Loading comments… ${m.loaded}/${m.total}`;
-      } else if (m.type === "done") {
-        state.loading = false;
-        state.comments = m.comments; // keep errored entries so we can report + retry them
-        state.total = m.comments.length;
-        state.truncated = !!m.truncated;
-        renderList();
-      } else if (m.type === "error") {
-        state.loading = false;
-        const map = {
-          "no-key": "Set an API key (extension icon) and reopen.",
-          "rate-limit": "API rate limit hit — try again shortly.",
-          "bad-key": "Invalid API key.",
-        };
-        statusEl.textContent = map[m.error] || `Error: ${m.error}`;
-      }
-    });
-    port.onDisconnect.addListener(() => {
-      if (state.loading) {
-        state.loading = false;
-        statusEl.textContent = "Connection interrupted — reopen to retry.";
-      }
-    });
-    port.postMessage({ docId });
-  }
-
-  function openDrawer() {
-    drawer.style.display = "flex";
-    launcher.style.display = "none";
-    loadDocket();
-  }
-  function closeDrawer() {
-    drawer.style.display = "none";
-    launcher.style.display = "block";
-  }
-
-  launcher.addEventListener("click", openDrawer);
+  document.body.appendChild(drawer);
   drawer.querySelector("#rgcn-close").addEventListener("click", closeDrawer);
+  drawerEls = {
+    drawer,
+    statusEl: drawer.querySelector("#rgcn-status"),
+    listEl: drawer.querySelector("#rgcn-list"),
+  };
+}
+
+function openDrawer() {
+  buildDrawer();
+  drawerEls.drawer.style.display = "flex";
+  loadDocket();
+  renderResults();
+}
+function closeDrawer() {
+  if (drawerEls) drawerEls.drawer.style.display = "none";
+}
+
+// --- Sidebar controls (injected into the native "Refine Results" panel) ------
+
+function styleNativeSelect(el) {
+  el.style.cssText =
+    "padding:6px 8px;font-size:13px;border:1px solid #919191;border-radius:0;background:#fff;width:100%;box-sizing:border-box";
+}
+
+// Locate the "Refine Results" heading so we can append our section to its panel.
+function findRefinePanel() {
+  const els = document.querySelectorAll("h1,h2,h3,h4,h5,h6,legend,strong,span,div");
+  for (const el of els) {
+    const t = (el.textContent || "").trim();
+    if (/refine results/i.test(t) && t.length < 40) return el.parentElement;
+  }
+  return null;
+}
+
+function ensureSidebar() {
+  if (document.getElementById("rgcn-refine-section")) return;
+  const panel = findRefinePanel();
+  if (!panel) return;
+
+  const section = document.createElement("div");
+  section.id = "rgcn-refine-section";
+  section.style.cssText = "border-top:1px solid #dfe1e2;padding:14px 0 6px;margin-top:8px";
+  section.innerHTML = `
+    <div style="font-weight:700;font-size:15px;margin-bottom:10px">Commenter <span style="font-weight:400;font-size:11px;color:#71767a">(extension)</span></div>
+    <label style="display:block;font-size:13px;font-weight:600;margin:0 0 4px">Submitter type</label>
+    <select id="rgcn-f-type"></select>
+    <label style="display:block;font-size:13px;font-weight:600;margin:12px 0 4px">Submission format</label>
+    <select id="rgcn-f-doc"></select>
+    <button id="rgcn-show" style="margin-top:12px;width:100%;padding:8px;font-size:13px;font-weight:600;color:#fff;background:#005ea2;border:none;cursor:pointer">Show matching comments →</button>
+    <div id="rgcn-count" style="font-size:12px;color:#4a4a4a;margin-top:8px;min-height:15px"></div>
+  `;
+  panel.appendChild(section);
+
+  const typeSel = section.querySelector("#rgcn-f-type");
+  const docSel = section.querySelector("#rgcn-f-doc");
+  typeSel.innerHTML = `
+    <option value="all">All</option>
+    <option value="org">🏢 Organizations</option>
+    <option value="person">👤 Individuals</option>
+    <option value="anon">Anonymous / no name</option>`;
+  docSel.innerHTML = `
+    <option value="all">All</option>
+    <option value="has">📎 Has document</option>
+    <option value="none">Inline text only</option>`;
+  styleNativeSelect(typeSel);
+  styleNativeSelect(docSel);
+  typeSel.value = state.filterType; // restore selections after an Ember repaint
+  docSel.value = state.filterDoc;
+
+  sidebarEls = { countEl: section.querySelector("#rgcn-count") };
+
   typeSel.addEventListener("change", () => {
     state.filterType = typeSel.value;
-    renderList();
+    renderResults();
   });
   docSel.addEventListener("change", () => {
     state.filterDoc = docSel.value;
-    renderList();
+    renderResults();
   });
+  section.querySelector("#rgcn-show").addEventListener("click", openDrawer);
+
+  renderResults(); // reflect any already-loaded data in the fresh count slot
 }
 
-// (Re)inject the launcher on navigation; the debounced observer (schedule) also
-// calls this on every SPA re-render.
+// (Re)inject on navigation; the debounced observer (schedule) also calls this.
 function ensurePanel() {
-  if (currentDocId()) buildPanel();
+  if (!currentDocId()) return;
+  ensureSidebar();
 }
 ensurePanel();
