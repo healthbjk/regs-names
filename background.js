@@ -135,3 +135,107 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true; // keep the message channel open for the async response
   }
 });
+
+// ---------------------------------------------------------------------------
+// Whole-docket load (for the "filter all comments" panel).
+//
+// The site paginates 25 comments/page server-side and the API has no
+// organization/attachment facet, so to filter across the entire docket we must
+// (1) enumerate every comment id, then (2) fetch each detail record (cached +
+// throttled, same as the per-card path). Progress streams back over a Port.
+// ---------------------------------------------------------------------------
+
+async function apiGetJson(url) {
+  let res;
+  try {
+    res = await fetch(url, { headers: { Accept: "application/vnd.api+json" } });
+  } catch (e) {
+    return { ok: false, error: "network" };
+  }
+  if (res.status === 429) return { ok: false, error: "rate-limit" };
+  if (res.status === 403) return { ok: false, error: "bad-key" };
+  if (!res.ok) return { ok: false, error: `http-${res.status}` };
+  try {
+    return { ok: true, json: await res.json() };
+  } catch (e) {
+    return { ok: false, error: "parse" };
+  }
+}
+
+// The comments API filters by the document's numeric objectId, not its friendly
+// id (CMS-2026-1255-0001), so resolve it first.
+async function resolveObjectId(docId, apiKey) {
+  const url =
+    `https://api.regulations.gov/v4/documents/${encodeURIComponent(docId)}` +
+    `?api_key=${encodeURIComponent(apiKey)}`;
+  const r = await apiGetJson(url);
+  if (!r.ok) return r;
+  const objectId = r.json && r.json.data && r.json.data.attributes && r.json.data.attributes.objectId;
+  return objectId ? { ok: true, objectId } : { ok: false, error: "no-object-id" };
+}
+
+async function enumerateCommentIds(objectId, apiKey) {
+  const ids = [];
+  let page = 1;
+  let pageCount = 1;
+  do {
+    const url =
+      `https://api.regulations.gov/v4/comments?filter[commentOnId]=${encodeURIComponent(objectId)}` +
+      `&page[size]=250&page[number]=${page}&sort=postedDate&api_key=${encodeURIComponent(apiKey)}`;
+    const r = await apiGetJson(url);
+    if (!r.ok) return r;
+    const data = r.json && Array.isArray(r.json.data) ? r.json.data : [];
+    for (const d of data) if (d && d.id) ids.push(d.id);
+    pageCount = (r.json && r.json.meta && r.json.meta.pageCount) || 1;
+    page++;
+  } while (page <= pageCount && page <= 20); // API caps page[number] at 20 (5000 comments)
+  return { ok: true, ids, truncated: pageCount > 20 };
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "docket") return;
+  let alive = true;
+  port.onDisconnect.addListener(() => (alive = false));
+  const send = (m) => {
+    if (alive) {
+      try {
+        port.postMessage(m);
+      } catch (e) {
+        alive = false;
+      }
+    }
+  };
+
+  port.onMessage.addListener(async (msg) => {
+    const docId = msg && msg.docId;
+    if (!docId) return send({ type: "error", error: "no-doc-id" });
+
+    const apiKey = await getApiKey();
+    if (!apiKey) return send({ type: "error", error: "no-key" });
+
+    const obj = await resolveObjectId(docId, apiKey);
+    if (!obj.ok) return send({ type: "error", error: obj.error });
+
+    send({ type: "status", phase: "enumerating" });
+    const en = await enumerateCommentIds(obj.objectId, apiKey);
+    if (!en.ok) return send({ type: "error", error: en.error });
+
+    const ids = en.ids;
+    const total = ids.length;
+    send({ type: "progress", loaded: 0, total });
+
+    const comments = new Array(total);
+    let loaded = 0;
+    await Promise.all(
+      ids.map((id, i) =>
+        enqueue(() => fetchCommenter(id)).then((res) => {
+          comments[i] = res && res.ok ? { id, ...res } : { id, error: (res && res.error) || "fail" };
+          loaded++;
+          if (loaded % 10 === 0 || loaded === total) send({ type: "progress", loaded, total });
+        })
+      )
+    );
+
+    send({ type: "done", comments, truncated: !!en.truncated });
+  });
+});

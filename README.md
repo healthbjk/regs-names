@@ -43,6 +43,21 @@ Below the name, each card also shows the substance of the submission:
 - **Otherwise**, the inline comment text (truncated, with the full text on
   hover).
 
+### Filter the whole docket
+
+A floating **🔎 Filter all comments** button (bottom-right of any comment list
+page) opens a drawer that loads every comment in the docket once and lets you
+filter the full set by:
+
+- **Submitter type** — organizations / individuals / anonymous
+- **Submission format** — has a document / inline text only
+
+Matching comments are listed with a link to each comment and its document. This
+is opt-in because the site paginates 25/page server-side and the API has no
+organization/attachment facet, so the drawer must fetch every comment's detail
+once (uses API quota; results are cached 30 days, so subsequent opens are fast).
+Dockets over 5,000 comments are capped at the first 5,000 (API limit).
+
 ## How it works
 
 - `content.js` finds `a[href*="/comment/"]` cards, extracts the comment ID, and
@@ -56,6 +71,13 @@ Below the name, each card also shows the substance of the submission:
 - `options.html/js` stores the API key in `chrome.storage.sync`.
 
 ## Design decisions
+
+### Whole-docket filtering is opt-in, not automatic
+
+Filtering by submitter type or attachment can't be done server-side (no API
+facet) and the list only renders 25 cards at a time, so a full-docket filter
+requires fetching every comment's detail. That's gated behind an explicit
+button rather than run on page load, to avoid silently spending API quota.
 
 ### Considered and rejected: per-organization comment counts
 

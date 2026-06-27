@@ -124,6 +124,7 @@ function processCards() {
   const anchors = document.querySelectorAll('a[href*="/comment/"]');
   anchors.forEach((a) => {
     if (a.dataset[PROCESSED]) return;
+    if (a.closest("#rgcn-drawer")) return; // skip links inside our own filter panel
     const id = extractId(a.getAttribute("href"));
     if (!id) return;
     a.dataset[PROCESSED] = "1";
@@ -150,10 +151,245 @@ function processCards() {
 let timer = null;
 function schedule() {
   clearTimeout(timer);
-  timer = setTimeout(processCards, 250);
+  timer = setTimeout(() => {
+    processCards();
+    ensurePanel(); // re-inject the filter launcher if a route change removed it
+  }, 250);
 }
 
 const observer = new MutationObserver(schedule);
 observer.observe(document.documentElement, { childList: true, subtree: true });
 
 processCards();
+
+// ===========================================================================
+// Whole-docket filter panel.
+//
+// A floating launcher injects a drawer that loads every comment in the docket
+// once (via the background Port) and lets you filter the full set by submitter
+// type and whether the submission is a document. Lives in its own DOM subtree
+// appended to <body> so the Ember SPA's re-renders don't wipe it.
+// ===========================================================================
+
+const DOC_RE = /\/document\/([^/]+)\/comment/;
+
+function currentDocId() {
+  const m = location.pathname.match(DOC_RE);
+  return m ? m[1] : null;
+}
+
+const state = {
+  comments: null, // loaded comment array, or null until loaded
+  loading: false,
+  filterType: "all", // all | org | person | anon
+  filterDoc: "all", // all | has | none
+};
+
+function hasDoc(c) {
+  return Array.isArray(c.attachments) && c.attachments.length > 0;
+}
+
+function matchesFilter(c) {
+  if (!c || c.error) return false;
+  if (state.filterType === "org" && c.kind !== "org") return false;
+  if (state.filterType === "person" && c.kind !== "person") return false;
+  if (state.filterType === "anon" && !(c.kind === "anon" || !c.name)) return false;
+  if (state.filterDoc === "has" && !hasDoc(c)) return false;
+  if (state.filterDoc === "none" && hasDoc(c)) return false;
+  return true;
+}
+
+function styleSelect(el) {
+  el.style.cssText =
+    "padding:5px 6px;font-size:12px;border:1px solid #ccc;border-radius:6px;background:#fff;width:100%";
+}
+
+function buildPanel() {
+  if (document.getElementById("rgcn-launcher")) return; // already injected
+  const docId = currentDocId();
+  if (!docId) return;
+
+  // Launcher button (bottom-right).
+  const launcher = document.createElement("button");
+  launcher.id = "rgcn-launcher";
+  launcher.textContent = "🔎 Filter all comments";
+  launcher.style.cssText = [
+    "position:fixed",
+    "right:18px",
+    "bottom:18px",
+    "z-index:2147483647",
+    "padding:10px 14px",
+    "font-size:13px",
+    "font-weight:600",
+    "color:#fff",
+    "background:#005ea2",
+    "border:none",
+    "border-radius:8px",
+    "box-shadow:0 2px 8px rgba(0,0,0,.25)",
+    "cursor:pointer",
+  ].join(";");
+
+  // Drawer.
+  const drawer = document.createElement("div");
+  drawer.id = "rgcn-drawer";
+  drawer.style.cssText = [
+    "position:fixed",
+    "top:0",
+    "right:0",
+    "width:360px",
+    "max-width:92vw",
+    "height:100vh",
+    "z-index:2147483647",
+    "background:#fff",
+    "box-shadow:-2px 0 12px rgba(0,0,0,.2)",
+    "display:none",
+    "flex-direction:column",
+    "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
+    "color:#1b1b1b",
+  ].join(";");
+
+  drawer.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #e0e0e0">
+      <strong style="font-size:14px">Filter all comments</strong>
+      <button id="rgcn-close" style="border:none;background:none;font-size:18px;cursor:pointer;line-height:1">✕</button>
+    </div>
+    <div style="padding:12px 14px;border-bottom:1px solid #e0e0e0">
+      <label style="display:block;font-size:11px;font-weight:600;margin-bottom:3px">Submitter type</label>
+      <select id="rgcn-f-type">
+        <option value="all">All</option>
+        <option value="org">🏢 Organizations</option>
+        <option value="person">👤 Individuals</option>
+        <option value="anon">Anonymous / no name</option>
+      </select>
+      <label style="display:block;font-size:11px;font-weight:600;margin:10px 0 3px">Submission format</label>
+      <select id="rgcn-f-doc">
+        <option value="all">All</option>
+        <option value="has">📎 Has document</option>
+        <option value="none">Inline text only</option>
+      </select>
+    </div>
+    <div id="rgcn-status" style="padding:10px 14px;font-size:12px;color:#4a4a4a;border-bottom:1px solid #e0e0e0"></div>
+    <div id="rgcn-list" style="flex:1;overflow:auto;padding:6px 10px"></div>
+  `;
+
+  document.body.append(launcher, drawer);
+
+  const typeSel = drawer.querySelector("#rgcn-f-type");
+  const docSel = drawer.querySelector("#rgcn-f-doc");
+  styleSelect(typeSel);
+  styleSelect(docSel);
+  const statusEl = drawer.querySelector("#rgcn-status");
+  const listEl = drawer.querySelector("#rgcn-list");
+
+  function renderList() {
+    listEl.innerHTML = "";
+    if (state.loading || !state.comments) return;
+    const matches = state.comments.filter(matchesFilter);
+    statusEl.textContent = `${matches.length} of ${state.comments.length} comments match`;
+    matches.forEach((c) => {
+      const item = document.createElement("div");
+      item.style.cssText = "padding:8px 4px;border-bottom:1px solid #f0f0f0;font-size:12.5px";
+
+      const nameLine = document.createElement("div");
+      nameLine.style.cssText = "font-weight:600;display:flex;gap:5px";
+      const tag = document.createElement("span");
+      tag.textContent = c.kind === "org" ? "🏢" : c.kind === "person" ? "👤" : "•";
+      const link = document.createElement("a");
+      link.href = `https://www.regulations.gov/comment/${c.id}`;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.style.cssText = "color:#005ea2;text-decoration:none";
+      link.textContent = c.name || "(no name)";
+      nameLine.append(tag, link);
+      item.appendChild(nameLine);
+
+      if (hasDoc(c)) {
+        const docLine = document.createElement("div");
+        docLine.style.cssText = "margin-top:2px";
+        c.attachments.forEach((att, i) => {
+          const a = document.createElement("a");
+          a.href = att.url;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.style.cssText = "color:#005ea2";
+          a.textContent = `📎 ${att.title}${att.format ? ` (${att.format})` : ""}`;
+          docLine.appendChild(a);
+          if (i < c.attachments.length - 1) docLine.appendChild(document.createTextNode(" · "));
+        });
+        item.appendChild(docLine);
+      } else if (c.text) {
+        const t = document.createElement("div");
+        t.style.cssText = "margin-top:2px;color:#3d3d3d";
+        t.title = c.text;
+        t.textContent = truncate(c.text);
+        item.appendChild(t);
+      }
+      listEl.appendChild(item);
+    });
+  }
+
+  function loadDocket() {
+    if (state.loading || state.comments) return;
+    state.loading = true;
+    statusEl.textContent = "Resolving docket…";
+
+    const port = chrome.runtime.connect({ name: "docket" });
+    port.onMessage.addListener((m) => {
+      if (m.type === "status" && m.phase === "enumerating") {
+        statusEl.textContent = "Finding all comments…";
+      } else if (m.type === "progress") {
+        statusEl.textContent = `Loading comments… ${m.loaded}/${m.total}`;
+      } else if (m.type === "done") {
+        state.loading = false;
+        state.comments = m.comments.filter((c) => !c.error);
+        if (m.truncated) {
+          statusEl.textContent = "Note: docket exceeds 5,000 comments; showing first 5,000.";
+        }
+        renderList();
+      } else if (m.type === "error") {
+        state.loading = false;
+        const map = {
+          "no-key": "Set an API key (extension icon) and reopen.",
+          "rate-limit": "API rate limit hit — try again shortly.",
+          "bad-key": "Invalid API key.",
+        };
+        statusEl.textContent = map[m.error] || `Error: ${m.error}`;
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      if (state.loading) {
+        state.loading = false;
+        statusEl.textContent = "Connection interrupted — reopen to retry.";
+      }
+    });
+    port.postMessage({ docId });
+  }
+
+  function openDrawer() {
+    drawer.style.display = "flex";
+    launcher.style.display = "none";
+    loadDocket();
+  }
+  function closeDrawer() {
+    drawer.style.display = "none";
+    launcher.style.display = "block";
+  }
+
+  launcher.addEventListener("click", openDrawer);
+  drawer.querySelector("#rgcn-close").addEventListener("click", closeDrawer);
+  typeSel.addEventListener("change", () => {
+    state.filterType = typeSel.value;
+    renderList();
+  });
+  docSel.addEventListener("change", () => {
+    state.filterDoc = docSel.value;
+    renderList();
+  });
+}
+
+// (Re)inject the launcher on navigation; the debounced observer (schedule) also
+// calls this on every SPA re-render.
+function ensurePanel() {
+  if (currentDocId()) buildPanel();
+}
+ensurePanel();
