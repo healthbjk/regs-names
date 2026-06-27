@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<!--
+  Store screenshot mockups, each exactly 1280x800 (Chrome Web Store size).
+  Open this file in a browser and screenshot each ".slide" (they are sized
+  precisely). Uses SYNTHETIC names so no real individual's data appears in
+  marketing assets. The styling mirrors the extension's real on-page output.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        color: #1b1b1b;
+      }
+      .slide {
+        width: 1280px;
+        height: 800px;
+        background: #fff;
+        margin: 0;
+        overflow: hidden;
+        position: relative;
+      }
+      .header {
+        background: #112e51;
+        color: #fff;
+        padding: 14px 28px;
+        font-weight: 700;
+        font-size: 18px;
+        letter-spacing: 0.3px;
+      }
+      .header span { font-weight: 400; opacity: 0.8; font-size: 13px; margin-left: 8px; }
+      .caption {
+        background: #005ea2;
+        color: #fff;
+        padding: 12px 28px;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .body { display: flex; padding: 20px 28px; gap: 24px; }
+      .sidebar { width: 260px; flex-shrink: 0; }
+      .refine-h { font-size: 13px; font-weight: 700; letter-spacing: 0.5px; color: #1b1b1b; border-bottom: 3px solid #4c8b2b; padding-bottom: 6px; }
+      .posted-h { font-weight: 700; margin: 14px 0 6px; }
+      .posted-h .minus { float: right; color: #888; }
+      .filt { color: #005ea2; font-size: 13px; margin: 5px 0; }
+      .commenter { border-top: 1px solid #dfe1e2; margin-top: 14px; padding-top: 14px; }
+      .commenter .title { font-weight: 700; font-size: 15px; }
+      .commenter .title .tag { font-weight: 400; font-size: 11px; color: #71767a; }
+      .commenter .note { font-size: 11px; color: #71767a; margin: 2px 0 10px; }
+      .commenter label { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
+      .commenter select {
+        width: 100%; padding: 6px 8px; font-size: 13px; border: 1px solid #919191; background: #fff;
+      }
+      .count { font-size: 12px; color: #1b1b1b; margin-top: 12px; font-weight: 700; }
+      .main { flex: 1; }
+      .main-h { font-size: 12px; letter-spacing: 0.5px; color: #565c65; border-bottom: 3px solid #4c8b2b; padding-bottom: 6px; }
+      .summary { display: flex; align-items: center; gap: 14px; padding: 12px 0 16px; font-size: 14px; }
+      .summary a { color: #005ea2; font-size: 12px; }
+      .card {
+        border: 1px solid #dfe1e2; border-radius: 2px; padding: 14px 16px; margin-bottom: 14px;
+      }
+      .sub { font-size: 11px; letter-spacing: 0.4px; color: #71767a; }
+      .ctitle { font-size: 17px; margin: 4px 0 0; }
+      .ctitle a { color: #005ea2; text-decoration: none; }
+      .ctitle .ic { margin-right: 4px; }
+      .ctext { color: #3d3d3d; font-size: 13.5px; margin: 6px 0 0; line-height: 1.4; }
+      .doc { font-size: 13.5px; margin: 6px 0 0; }
+      .doc a { color: #005ea2; }
+      .meta { font-size: 12px; color: #71767a; margin-top: 8px; }
+      .hl { background: #fff3cd; }
+    </style>
+  </head>
+  <body>
+    <!-- ===================== SLIDE 1: names on the list ===================== -->
+    <div class="slide">
+      <div class="header">Regulations.gov <span>+ Comment Names (extension)</span></div>
+      <div class="caption">See who submitted each comment — name, organization, and the comment itself</div>
+      <div class="body">
+        <div class="sidebar">
+          <div class="refine-h">REFINE RESULTS</div>
+          <div class="posted-h">Posted <span class="minus">—</span></div>
+          <div class="filt">Last 7 Days (174)</div>
+          <div class="filt">Last 30 Days (450)</div>
+          <div class="filt">Last 90 Days (471)</div>
+          <div class="commenter">
+            <div class="title">Commenter <span class="tag">(extension)</span></div>
+            <div class="note">Filters the full docket in the list at right.</div>
+            <label>Submitter type</label>
+            <select><option>All</option></select>
+            <label>Submission format</label>
+            <select><option>All</option></select>
+          </div>
+        </div>
+        <div class="main">
+          <div class="main-h">COMMENTS</div>
+          <div style="height:14px"></div>
+          <div class="card">
+            <div class="sub">PUBLIC SUBMISSION</div>
+            <h3 class="ctitle"><span class="ic">🏢</span><a href="#">American Hospital Association</a></h3>
+            <div class="ctext">We write in strong support of CMS's efforts to streamline prior authorization. Our member hospitals report that avoidable delays…</div>
+            <div class="meta">ID CMS-2026-1255-0347</div>
+          </div>
+          <div class="card">
+            <div class="sub">PUBLIC SUBMISSION</div>
+            <h3 class="ctitle"><span class="ic">👤</span><a href="#">Dr. Maria Alvarez</a></h3>
+            <div class="ctext">As a practicing cardiologist, I see firsthand how prior authorization requirements delay necessary care for my patients…</div>
+            <div class="meta">ID CMS-2026-1255-0413</div>
+          </div>
+          <div class="card">
+            <div class="sub">PUBLIC SUBMISSION</div>
+            <h3 class="ctitle"><span class="ic">🏢</span><a href="#">Pharmaceutical Research and Manufacturers Assn.</a></h3>
+            <div class="doc"><a href="#">📎 PhRMA comment letter (PDF)</a></div>
+            <div class="meta">ID CMS-2026-1255-0418</div>
+          </div>
+          <div class="card">
+            <div class="sub">PUBLIC SUBMISSION</div>
+            <h3 class="ctitle"><span class="ic">👤</span><a href="#">Jordan Whitfield</a></h3>
+            <div class="ctext">I support the proposed interoperability standards. Patients deserve timely access to medications without administrative…</div>
+            <div class="meta">ID CMS-2026-1255-0369</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============== SLIDE 2: filtered-in-place takeover ============== -->
+    <div class="slide">
+      <div class="header">Regulations.gov <span>+ Comment Names (extension)</span></div>
+      <div class="caption">Filter the whole docket by submitter type or attachment — right in the list</div>
+      <div class="body">
+        <div class="sidebar">
+          <div class="refine-h">REFINE RESULTS</div>
+          <div class="posted-h">Posted <span class="minus">—</span></div>
+          <div class="filt">Last 7 Days (174)</div>
+          <div class="filt">Last 90 Days (471)</div>
+          <div class="commenter">
+            <div class="title">Commenter <span class="tag">(extension)</span></div>
+            <div class="note">Filters the full docket in the list at right.</div>
+            <label>Submitter type</label>
+            <select><option>🏢 Organizations</option></select>
+            <label>Submission format</label>
+            <select><option>📎 Has document</option></select>
+            <div class="count">96 match · 471/471 loaded</div>
+          </div>
+        </div>
+        <div class="main">
+          <div class="main-h">COMMENTS</div>
+          <div class="summary"><strong>96 match · 471/471 loaded</strong><a href="#">Clear filters</a></div>
+          <div class="card">
+            <div class="sub">PUBLIC SUBMISSION</div>
+            <h3 class="ctitle"><span class="ic">🏢</span><a href="#">American Medical Association</a></h3>
+            <div class="doc"><a href="#">📎 AMA comments on CMS-0062-P (PDF)</a></div>
+            <div class="meta">ID CMS-2026-1255-0099</div>
+          </div>
+          <div class="card">
+            <div class="sub">PUBLIC SUBMISSION</div>
+            <h3 class="ctitle"><span class="ic">🏢</span><a href="#">Blue Cross Blue Shield Association</a></h3>
+            <div class="doc"><a href="#">📎 BCBSA prior authorization comment (PDF)</a></div>
+            <div class="meta">ID CMS-2026-1255-0152</div>
+          </div>
+          <div class="card">
+            <div class="sub">PUBLIC SUBMISSION</div>
+            <h3 class="ctitle"><span class="ic">🏢</span><a href="#">Epic Systems Corporation</a></h3>
+            <div class="doc"><a href="#">📎 Epic interoperability comments (PDF)</a></div>
+            <div class="meta">ID CMS-2026-1255-0203</div>
+          </div>
+          <div class="card">
+            <div class="sub">PUBLIC SUBMISSION</div>
+            <h3 class="ctitle"><span class="ic">🏢</span><a href="#">The ALS Association</a></h3>
+            <div class="doc"><a href="#">📎 ALS Association Comments on FY27 ePA NPRM (PDF)</a></div>
+            <div class="meta">ID CMS-2026-1255-0231</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
