@@ -4,6 +4,29 @@ const input = document.getElementById("apiKey");
 const statusEl = document.getElementById("status");
 const saveBtn = document.getElementById("save");
 
+// Turn the "Tell GSA" link into a ready-to-send email to the Regulations.gov
+// Help Desk (lower friction than the form + reCAPTCHA). Falls back to the
+// /support URL in the HTML if the mail client can't be opened.
+(() => {
+  const tell = document.getElementById("tellGsa");
+  if (!tell) return;
+  const subject = "Feature request: show commenter name on the comment list";
+  const body = [
+    "Hello,",
+    "",
+    "On a document's comment list, each comment shows only a generic title and ID. To see who submitted it (the organization or individual), you have to open each comment one at a time — even though that information is already in the comment detail API.",
+    "",
+    "Please consider:",
+    "1) Show the submitter's name/organization on each comment card in the list.",
+    "2) Add a filter for submitter type (organization vs. individual) and for whether a submission includes an attachment.",
+    "",
+    "Thank you for considering it.",
+  ].join("\n");
+  tell.href = `mailto:regulationshelpdesk@gsa.gov?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  tell.removeAttribute("target");
+  tell.removeAttribute("rel");
+})();
+
 function setStatus(text, kind) {
   statusEl.textContent = text;
   statusEl.className = kind || "";
