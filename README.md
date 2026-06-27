@@ -35,15 +35,24 @@ are cached locally for 30 days so revisiting pages costs nothing.
 Each comment card will gain a line like `🏢 Acme Health Systems` or
 `👤 Jane Doe`. Comments with no name show `— no name provided —`.
 
+Below the name, each card also shows the substance of the submission:
+
+- **If the comment is an uploaded document**, a link to the attachment, e.g.
+  `📎 Acme comment letter (PDF)` (opens the file in a new tab). Multiple
+  attachments are listed, separated by `·`.
+- **Otherwise**, the inline comment text (truncated, with the full text on
+  hover).
+
 ## How it works
 
 - `content.js` finds `a[href*="/comment/"]` cards, extracts the comment ID, and
   asks the background worker for the name. A `MutationObserver` re-scans on
   pagination / SPA navigation.
-- `background.js` calls `/v4/comments/{id}` (from the service worker, using
-  `host_permissions` to avoid CORS), derives a display name from
-  `organization` / `firstName` / `lastName`, caches it, and throttles to 4
-  concurrent requests.
+- `background.js` calls `/v4/comments/{id}?include=attachments` (from the
+  service worker, using `host_permissions` to avoid CORS), derives a display
+  name from `organization` / `firstName` / `lastName`, plus the inline comment
+  text and any attachment file URLs, caches it, and throttles to 4 concurrent
+  requests.
 - `options.html/js` stores the API key in `chrome.storage.sync`.
 
 ## Design decisions

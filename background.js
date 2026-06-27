@@ -4,7 +4,7 @@
 // across all tabs.
 
 const API_BASE = "https://api.regulations.gov/v4/comments/";
-const CACHE_PREFIX = "commenter:";
+const CACHE_PREFIX = "commenter:v2:"; // bumped: entries now include text + attachments
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
 // Simple concurrency-limited queue so we don't hammer the API (and trip the
@@ -44,9 +44,9 @@ async function readCache(id) {
   return null;
 }
 
-async function writeCache(id, name, kind) {
+async function writeCache(id, payload) {
   const key = CACHE_PREFIX + id;
-  await chrome.storage.local.set({ [key]: { name, kind, t: Date.now() } });
+  await chrome.storage.local.set({ [key]: { ...payload, t: Date.now() } });
 }
 
 // Turn the comment attributes into a single display name + a kind hint.
@@ -63,14 +63,44 @@ function deriveName(attr) {
   return { name: null, kind: "anon" }; // e.g. "Anonymous Anonymous" stripped, or mass/bulk submissions
 }
 
+// Pull the inline comment text and any attachment (document) links out of the
+// detail record. Attachments come back in the top-level `included` array when
+// the request uses ?include=attachments.
+function deriveContent(json) {
+  const attr = (json && json.data && json.data.attributes) || {};
+  const text = (attr.comment || "").trim();
+
+  const included = Array.isArray(json && json.included) ? json.included : [];
+  const attachments = [];
+  for (const item of included) {
+    if (item.type !== "attachments") continue;
+    const a = item.attributes || {};
+    const formats = Array.isArray(a.fileFormats) ? a.fileFormats : [];
+    const file = formats.find((f) => f && f.fileUrl);
+    if (file) {
+      attachments.push({
+        title: (a.title || "Attachment").trim(),
+        url: file.fileUrl,
+        format: (file.format || "").toUpperCase(),
+      });
+    }
+  }
+  return { text, attachments };
+}
+
 async function fetchCommenter(id) {
   const cached = await readCache(id);
-  if (cached) return { ok: true, name: cached.name, kind: cached.kind, cached: true };
+  if (cached) {
+    const { t, ...rest } = cached;
+    return { ok: true, ...rest, cached: true };
+  }
 
   const apiKey = await getApiKey();
   if (!apiKey) return { ok: false, error: "no-key" };
 
-  const url = `${API_BASE}${encodeURIComponent(id)}?api_key=${encodeURIComponent(apiKey)}`;
+  const url =
+    `${API_BASE}${encodeURIComponent(id)}` +
+    `?include=attachments&api_key=${encodeURIComponent(apiKey)}`;
 
   let res;
   try {
@@ -93,8 +123,10 @@ async function fetchCommenter(id) {
 
   const attr = json && json.data && json.data.attributes;
   const { name, kind } = deriveName(attr);
-  await writeCache(id, name, kind);
-  return { ok: true, name, kind, cached: false };
+  const { text, attachments } = deriveContent(json);
+  const payload = { name, kind, text, attachments };
+  await writeCache(id, payload);
+  return { ok: true, ...payload, cached: false };
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

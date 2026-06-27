@@ -11,42 +11,94 @@ function extractId(href) {
   return m ? m[1] : null;
 }
 
-function makeBadge() {
-  const el = document.createElement("div");
-  el.className = "rgcn-name";
-  el.style.cssText = [
+const MAX_TEXT = 320;
+
+function truncate(s) {
+  return s.length > MAX_TEXT ? s.slice(0, MAX_TEXT).trimEnd() + "…" : s;
+}
+
+// A row holds the name line and a body line (document link[s] or comment text).
+function makeRow() {
+  const row = document.createElement("div");
+  row.className = "rgcn-row";
+  row.style.cssText = "margin:4px 0 2px;line-height:1.35";
+
+  const name = document.createElement("div");
+  name.className = "rgcn-name";
+  name.style.cssText = [
     "font-weight:600",
     "font-size:0.95em",
-    "margin:4px 0 2px",
     "color:#1b1b1b",
-    "line-height:1.3",
     "display:flex",
     "align-items:center",
     "gap:6px",
   ].join(";");
-  el.textContent = "";
-  return el;
+
+  const body = document.createElement("div");
+  body.className = "rgcn-body";
+  body.style.cssText = "font-size:0.9em;margin-top:2px";
+
+  row.append(name, body);
+  return { row, name, body };
 }
 
-function renderResult(badge, res) {
-  badge.style.color = "#1b1b1b";
+function renderName(nameEl, res) {
+  nameEl.innerHTML = "";
+  if (res.name) {
+    const tag = document.createElement("span");
+    tag.textContent = res.kind === "org" ? "🏢" : res.kind === "person" ? "👤" : "•";
+    const name = document.createElement("span");
+    name.textContent = res.name;
+    nameEl.append(tag, name);
+  } else {
+    nameEl.style.color = "#6b6b6b";
+    nameEl.style.fontWeight = "400";
+    nameEl.textContent = "— no name provided —";
+  }
+}
+
+// If the submission has attachment(s), link the document(s); otherwise show the
+// inline comment text.
+function renderBody(bodyEl, res) {
+  bodyEl.innerHTML = "";
+  const attachments = Array.isArray(res.attachments) ? res.attachments : [];
+
+  if (attachments.length) {
+    const label = document.createElement("span");
+    label.textContent = "📎 ";
+    bodyEl.appendChild(label);
+    attachments.forEach((att, i) => {
+      const a = document.createElement("a");
+      a.href = att.url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.style.cssText = "color:#005ea2;text-decoration:underline";
+      a.textContent = att.format ? `${att.title} (${att.format})` : att.title;
+      bodyEl.appendChild(a);
+      if (i < attachments.length - 1) bodyEl.appendChild(document.createTextNode(" · "));
+    });
+    return;
+  }
+
+  const text = (res.text || "").trim();
+  if (text) {
+    bodyEl.style.color = "#3d3d3d";
+    bodyEl.title = text;
+    bodyEl.textContent = truncate(text);
+  } else {
+    bodyEl.remove();
+  }
+}
+
+function renderResult(parts, res) {
+  const { row, name, body } = parts;
   if (!res) {
-    badge.remove();
+    row.remove();
     return;
   }
   if (res.ok) {
-    if (res.name) {
-      badge.innerHTML = "";
-      const tag = document.createElement("span");
-      tag.textContent = res.kind === "org" ? "🏢" : res.kind === "person" ? "👤" : "•";
-      const name = document.createElement("span");
-      name.textContent = res.name;
-      badge.append(tag, name);
-    } else {
-      badge.style.color = "#6b6b6b";
-      badge.style.fontWeight = "400";
-      badge.textContent = "— no name provided —";
-    }
+    renderName(name, res);
+    renderBody(body, res);
     return;
   }
   // error states
@@ -57,14 +109,15 @@ function renderResult(badge, res) {
     "not-found": "",
     network: "⚠️ Network error",
   };
-  const text = messages[res.error] ?? `⚠️ ${res.error}`;
-  if (!text) {
-    badge.remove();
+  const msg = messages[res.error] ?? `⚠️ ${res.error}`;
+  if (!msg) {
+    row.remove();
     return;
   }
-  badge.style.color = "#a4140a";
-  badge.style.fontWeight = "400";
-  badge.textContent = text;
+  name.style.color = "#a4140a";
+  name.style.fontWeight = "400";
+  name.textContent = msg;
+  body.remove();
 }
 
 function processCards() {
@@ -75,20 +128,20 @@ function processCards() {
     if (!id) return;
     a.dataset[PROCESSED] = "1";
 
-    const badge = makeBadge();
-    badge.textContent = "…";
-    badge.style.color = "#6b6b6b";
-    badge.style.fontWeight = "400";
+    const parts = makeRow();
+    parts.name.textContent = "…";
+    parts.name.style.color = "#6b6b6b";
+    parts.name.style.fontWeight = "400";
 
-    // Insert the badge right after the comment's title link.
-    a.insertAdjacentElement("afterend", badge);
+    // Insert the row right after the comment's title link.
+    a.insertAdjacentElement("afterend", parts.row);
 
     chrome.runtime.sendMessage({ type: "getCommenter", id }, (res) => {
       if (chrome.runtime.lastError) {
-        badge.remove();
+        parts.row.remove();
         return;
       }
-      renderResult(badge, res);
+      renderResult(parts, res);
     });
   });
 }
