@@ -1,10 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "Regulations.gov Commenter Names",
-  "version": "1.0.0",
-  "description": "Shows the commenting organization or person's name directly on regulations.gov comment list (overview) pages.",
+  "name": "Comment Names for Regulations.gov (Unofficial)",
+  "version": "1.1.0",
+  "description": "Unofficial. Shows the commenting organization or person's name on Regulations.gov comment lists, and filters the list by submitter type or attachment.",
   "permissions": ["storage"],
   "host_permissions": ["https://api.regulations.gov/*"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "background": {
     "service_worker": "background.js"
   },
@@ -13,19 +19,17 @@
       "matches": ["https://www.regulations.gov/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://open.gsa.gov/api/regulationsgov/*",
-        "https://api.data.gov/signup/*"
-      ],
-      "js": ["keycapture.js"],
-      "run_at": "document_idle"
     }
   ],
   "options_page": "options.html",
   "action": {
     "default_popup": "options.html",
-    "default_title": "Regulations.gov Commenter Names — set API key"
+    "default_title": "Comment Names for Regulations.gov",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   }
 }

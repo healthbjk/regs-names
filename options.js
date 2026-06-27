@@ -69,15 +69,3 @@ input.addEventListener("keydown", (e) => {
     validateAndSave(input.value);
   }
 });
-
-// If the signup-page capture saves a key while this page is open, reflect it.
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "sync" && changes.apiKey) {
-    const v = changes.apiKey.newValue || "";
-    input.value = v;
-    if (v) {
-      setStatus("✓ Key captured from the signup page and saved.", "ok");
-      setField("ok");
-    }
-  }
-});

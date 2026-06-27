@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Regulations.gov Commenter Names</title>
+    <title>Comment Names for Regulations.gov</title>
     <style>
       body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -85,14 +85,17 @@
     </style>
   </head>
   <body>
-    <h1>Regulations.gov Commenter Names</h1>
+    <h1>Comment Names for Regulations.gov</h1>
+    <p class="hint" style="margin-top:0">
+      Unofficial — not affiliated with or endorsed by Regulations.gov or the
+      U.S. government.
+    </p>
     <p>To show submitter names this extension needs a free regulations.gov API key.</p>
 
     <ol>
       <li>Click <strong>Get a free key</strong> below.</li>
-      <li>Enter your name &amp; email on the official form and submit.</li>
-      <li>Your key appears instantly — this extension will offer to save it for
-        you automatically. (You can also paste it below.)</li>
+      <li>Enter your name &amp; email on the official api.data.gov form and submit.</li>
+      <li>Copy the key it shows you and paste it below.</li>
     </ol>
 
     <a id="getKey" class="btn" href="#">Get a free key ↗</a>
@@ -108,6 +111,8 @@
     <div class="hint">
       Validated against the live API and stored locally via
       chrome.storage.sync. One key works across all regulations.gov pages.
+      It is never sent anywhere except the official regulations.gov API.
+      <a href="https://github.com/healthbjk/regs-names/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy policy</a>.
     </div>
 
     <script src="options.js"></script>

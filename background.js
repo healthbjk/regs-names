@@ -164,13 +164,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     saveValidKey(msg.key).then(sendResponse);
     return true;
   }
-  if (msg.type === "captureKey") {
-    captureKey(msg.key).then(sendResponse);
-    return true;
-  }
 });
 
-// --- API key validation / capture --------------------------------------------
+// --- API key validation ------------------------------------------------------
 
 // A live API call is the only reliable way to tell a good key from a typo or a
 // docs sample. We use a tiny documents query.
@@ -187,22 +183,6 @@ async function saveValidKey(key) {
   if (!v.ok) return v;
   await chrome.storage.sync.set({ apiKey: (key || "").trim() });
   return { ok: true };
-}
-
-// Called by the signup-page content script when it spots a candidate key.
-// Validating first means docs samples / partial tokens never get saved.
-async function captureKey(key) {
-  const v = await validateKey(key);
-  if (!v.ok) return { ok: false, error: v.error };
-  const k = (key || "").trim();
-  const { apiKey } = await chrome.storage.sync.get("apiKey");
-  const existing = (apiKey || "").trim();
-  if (!existing) {
-    await chrome.storage.sync.set({ apiKey: k });
-    return { ok: true, saved: true };
-  }
-  if (existing === k) return { ok: true, saved: true, already: true };
-  return { ok: true, saved: false, conflict: true }; // ask before overwriting a different key
 }
 
 // ---------------------------------------------------------------------------
