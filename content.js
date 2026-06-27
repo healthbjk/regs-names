@@ -424,14 +424,13 @@ function styleNativeSelect(el) {
     "padding:6px 8px;font-size:13px;border:1px solid #919191;border-radius:0;background:#fff;width:100%;box-sizing:border-box";
 }
 
-// Locate the "Refine Results" heading so we can append our section to its panel.
+// The native filter sections live inside #collapse-filter (the Bootstrap
+// collapse that holds "Posted" etc.), within the .col-md-3 sidebar column. We
+// append our section there so it sits alongside the site's own filters and
+// inherits its show/hide behavior. (Both ids/classes are stable; matching the
+// "Refine Results" heading text is not — it renders with a double space.)
 function findRefinePanel() {
-  const els = document.querySelectorAll("h1,h2,h3,h4,h5,h6,legend,strong,span,div");
-  for (const el of els) {
-    const t = (el.textContent || "").trim();
-    if (/refine results/i.test(t) && t.length < 40) return el.parentElement;
-  }
-  return null;
+  return document.getElementById("collapse-filter") || document.querySelector("div.col-md-3");
 }
 
 function ensureSidebar() {
