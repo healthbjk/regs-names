@@ -9,13 +9,13 @@
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         margin: 0;
         padding: 18px;
-        width: 340px;
+        width: 360px;
         color: #1b1b1b;
         background: #fff;
       }
       h1 {
         font-size: 15px;
-        margin: 0 0 4px;
+        margin: 0 0 6px;
       }
       p {
         font-size: 12.5px;
@@ -23,23 +23,20 @@
         color: #4a4a4a;
         margin: 8px 0;
       }
-      label {
-        display: block;
-        font-size: 12px;
-        font-weight: 600;
-        margin: 14px 0 4px;
+      ol {
+        font-size: 12.5px;
+        line-height: 1.5;
+        color: #4a4a4a;
+        padding-left: 18px;
+        margin: 8px 0;
       }
-      input {
-        width: 100%;
+      .btn {
+        display: inline-block;
         box-sizing: border-box;
-        padding: 8px;
-        font-size: 13px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
-      }
-      button {
-        margin-top: 12px;
-        padding: 8px 14px;
+        width: 100%;
+        text-align: center;
+        margin-top: 4px;
+        padding: 10px 14px;
         font-size: 13px;
         font-weight: 600;
         color: #fff;
@@ -47,39 +44,71 @@
         border: none;
         border-radius: 6px;
         cursor: pointer;
+        text-decoration: none;
       }
-      button:hover { background: #1a4480; }
-      a { color: #005ea2; }
+      .btn:hover { background: #1a4480; }
+      .btn.secondary {
+        background: #fff;
+        color: #005ea2;
+        border: 1px solid #005ea2;
+      }
+      .btn.secondary:hover { background: #eef4fb; }
+      label {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        margin: 16px 0 4px;
+      }
+      .field { display: flex; gap: 6px; }
+      input {
+        flex: 1;
+        box-sizing: border-box;
+        padding: 8px;
+        font-size: 13px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+      }
+      input.ok { border-color: #00a91c; }
+      input.bad { border-color: #d83933; }
       #status {
         font-size: 12px;
-        margin-top: 10px;
+        margin-top: 8px;
         min-height: 16px;
-        color: #00a91c;
         font-weight: 600;
       }
-      .hint { font-size: 11.5px; color: #6b6b6b; }
+      #status.ok { color: #00a91c; }
+      #status.bad { color: #d83933; }
+      #status.info { color: #4a4a4a; font-weight: 400; }
+      .hint { font-size: 11.5px; color: #6b6b6b; margin-top: 6px; }
+      hr { border: none; border-top: 1px solid #eee; margin: 16px 0; }
+      a { color: #005ea2; }
     </style>
   </head>
   <body>
     <h1>Regulations.gov Commenter Names</h1>
-    <p>
-      This adds the submitting organization / person to each comment on
-      regulations.gov list pages. It needs a free regulations.gov API key.
-    </p>
-    <p>
-      Get one in seconds at
-      <a href="https://open.gsa.gov/api/regulationsgov/" target="_blank" rel="noopener"
-        >open.gsa.gov/api/regulationsgov</a
-      >
-      (sign up via api.data.gov).
-    </p>
+    <p>To show submitter names this extension needs a free regulations.gov API key.</p>
+
+    <ol>
+      <li>Click <strong>Get a free key</strong> below.</li>
+      <li>Enter your name &amp; email on the official form and submit.</li>
+      <li>Your key appears instantly — this extension will offer to save it for
+        you automatically. (You can also paste it below.)</li>
+    </ol>
+
+    <a id="getKey" class="btn" href="#">Get a free key ↗</a>
+
+    <hr />
 
     <label for="apiKey">API key</label>
-    <input id="apiKey" type="password" placeholder="your api.data.gov key" autocomplete="off" />
-    <div class="hint">Stored locally in your browser via chrome.storage.sync.</div>
-
-    <button id="save">Save</button>
-    <span id="status"></span>
+    <div class="field">
+      <input id="apiKey" type="text" placeholder="paste your key here" autocomplete="off" spellcheck="false" />
+      <button id="save" class="btn secondary" style="width:auto">Save</button>
+    </div>
+    <div id="status"></div>
+    <div class="hint">
+      Validated against the live API and stored locally via
+      chrome.storage.sync. One key works across all regulations.gov pages.
+    </div>
 
     <script src="options.js"></script>
   </body>

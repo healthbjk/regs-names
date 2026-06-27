@@ -14,11 +14,19 @@ comment's title.
 regulations.gov is a client-side (Ember) app and the list pages genuinely don't
 contain the submitter name — it only exists in the comment **detail** record,
 which is served from the regulations.gov API v4 (`/v4/comments/{id}`). That API
-requires a free key.
+requires a free key. Getting one takes about a minute and the extension makes
+it nearly hands-free:
 
-1. Go to <https://open.gsa.gov/api/regulationsgov/> and click "Request an API
-   key" (it's an api.data.gov signup — instant, emailed to you).
-2. Load the extension (below), click its toolbar icon, paste the key, Save.
+1. Click the extension's toolbar icon, then **Get a free key** — it opens the
+   official signup page.
+2. Enter your name & email and submit. The key (a global api.data.gov key that
+   works for regulations.gov) appears instantly.
+3. **The extension detects the new key on that page and saves it for you**
+   automatically — a banner confirms "You're all set!". No copy/paste.
+
+You can always paste a key manually into the popup instead; it's validated
+against the live API and saved on success. On comment pages, the "Set an API
+key" prompt is clickable and opens this setup.
 
 The free key allows ~1,000 requests/hour, which is 40 list pages/hour. Results
 are cached locally for 30 days so revisiting pages costs nothing.
@@ -28,7 +36,7 @@ are cached locally for 30 days so revisiting pages costs nothing.
 1. Open `chrome://extensions`.
 2. Toggle **Developer mode** (top right).
 3. Click **Load unpacked** and select this folder.
-4. Click the extension's icon and enter your API key.
+4. Click the extension's icon and follow the one-minute key setup above.
 5. Visit any comment list page, e.g.
    `https://www.regulations.gov/document/CMS-2026-1255-0001/comment`.
 
@@ -68,7 +76,12 @@ Dockets over 5,000 comments are capped at the first 5,000 (API limit).
   name from `organization` / `firstName` / `lastName`, plus the inline comment
   text and any attachment file URLs, caches it, and throttles to 4 concurrent
   requests.
-- `options.html/js` stores the API key in `chrome.storage.sync`.
+- `options.html/js` is the popup: a "Get a free key" button, live key
+  validation, and storage in `chrome.storage.sync`.
+- `keycapture.js` runs on the signup pages (`open.gsa.gov/api/regulationsgov`,
+  `api.data.gov/signup`), detects the newly issued 40-char key, validates it via
+  the background worker, and saves it — automatically if no key is set, or with
+  a confirm if replacing an existing one.
 
 ## Design decisions
 

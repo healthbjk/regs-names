@@ -130,11 +130,63 @@ async function fetchCommenter(id) {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg && msg.type === "getCommenter" && msg.id) {
+  if (!msg) return;
+  if (msg.type === "getCommenter" && msg.id) {
     enqueue(() => fetchCommenter(msg.id)).then(sendResponse);
     return true; // keep the message channel open for the async response
   }
+  if (msg.type === "openOptions") {
+    chrome.runtime.openOptionsPage();
+    return false;
+  }
+  if (msg.type === "validateKey") {
+    validateKey(msg.key).then(sendResponse);
+    return true;
+  }
+  if (msg.type === "saveValidKey") {
+    saveValidKey(msg.key).then(sendResponse);
+    return true;
+  }
+  if (msg.type === "captureKey") {
+    captureKey(msg.key).then(sendResponse);
+    return true;
+  }
 });
+
+// --- API key validation / capture --------------------------------------------
+
+// A live API call is the only reliable way to tell a good key from a typo or a
+// docs sample. We use a tiny documents query.
+async function validateKey(key) {
+  const k = (key || "").trim();
+  if (!k) return { ok: false, error: "empty" };
+  const url = `https://api.regulations.gov/v4/documents?page[size]=5&api_key=${encodeURIComponent(k)}`;
+  const r = await apiGetJson(url);
+  return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
+async function saveValidKey(key) {
+  const v = await validateKey(key);
+  if (!v.ok) return v;
+  await chrome.storage.sync.set({ apiKey: (key || "").trim() });
+  return { ok: true };
+}
+
+// Called by the signup-page content script when it spots a candidate key.
+// Validating first means docs samples / partial tokens never get saved.
+async function captureKey(key) {
+  const v = await validateKey(key);
+  if (!v.ok) return { ok: false, error: v.error };
+  const k = (key || "").trim();
+  const { apiKey } = await chrome.storage.sync.get("apiKey");
+  const existing = (apiKey || "").trim();
+  if (!existing) {
+    await chrome.storage.sync.set({ apiKey: k });
+    return { ok: true, saved: true };
+  }
+  if (existing === k) return { ok: true, saved: true, already: true };
+  return { ok: true, saved: false, conflict: true }; // ask before overwriting a different key
+}
 
 // ---------------------------------------------------------------------------
 // Whole-docket load (for the "filter all comments" panel).

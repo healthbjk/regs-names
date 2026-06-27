@@ -13,6 +13,14 @@
       "matches": ["https://www.regulations.gov/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://open.gsa.gov/api/regulationsgov/*",
+        "https://api.data.gov/signup/*"
+      ],
+      "js": ["keycapture.js"],
+      "run_at": "document_idle"
     }
   ],
   "options_page": "options.html",

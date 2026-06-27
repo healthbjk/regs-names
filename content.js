@@ -117,6 +117,12 @@ function renderResult(parts, res) {
   name.style.color = "#a4140a";
   name.style.fontWeight = "400";
   name.textContent = msg;
+  if (res.error === "no-key" || res.error === "bad-key") {
+    name.style.cursor = "pointer";
+    name.style.textDecoration = "underline";
+    name.title = "Open extension setup to add your API key";
+    name.addEventListener("click", () => chrome.runtime.sendMessage({ type: "openOptions" }));
+  }
   body.remove();
 }
 
