@@ -7,6 +7,14 @@ const API_BASE = "https://api.regulations.gov/v4/comments/";
 const CACHE_PREFIX = "commenter:v2:"; // bumped: entries now include text + attachments
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
+// A transparent, static client identifier sent on every API request (no user
+// data). It identifies the software, not the user — like a User-Agent (which
+// fetch() forbids setting). Purpose: give GSA a traceable footprint in their
+// api.data.gov logs, so the demand for "show the submitter name on the comment
+// list" is visible and could nudge them to add it natively.
+const CLIENT_HEADER = "X-Regs-Names-Client";
+const CLIENT_VALUE = `regs-names-extension/${chrome.runtime.getManifest().version} (+https://github.com/healthbjk/regs-names)`;
+
 // Simple concurrency-limited queue so we don't hammer the API (and trip the
 // per-second rate limit) when a page has 25 cards.
 const MAX_CONCURRENT = 4;
@@ -37,11 +45,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // (e.g. loading a whole docket) rides out short-term rate limits instead of
 // dropping comments. Returns { netErr } or { res }.
 async function fetchWithRetry(url, headers, attempts = 4) {
+  const merged = { ...headers, [CLIENT_HEADER]: CLIENT_VALUE };
   let delay = 700;
   for (let i = 0; i < attempts; i++) {
     let res;
     try {
-      res = await fetch(url, { headers });
+      res = await fetch(url, { headers: merged });
     } catch (e) {
       return { netErr: true };
     }

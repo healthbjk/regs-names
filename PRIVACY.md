@@ -27,6 +27,13 @@ official Regulations.gov API (`https://api.regulations.gov`).
 - You can remove it at any time by clearing the field in the popup, or by
   removing the extension.
 
+**Client identifier (no personal data).**
+- Each API request includes a static `X-Regs-Names-Client` header identifying
+  the extension and its version (e.g. `regs-names-extension/1.1.0`). This
+  identifies the *software*, not you — it contains no personal or device data —
+  and exists so the operator of the API (GSA) can see this client's usage in
+  their own logs. It is sent only to `https://api.regulations.gov`.
+
 **Public comment data.**
 - When you view a Regulations.gov comment page, the extension requests comment
   details (submitter name/organization, comment text, attachment links) from the
