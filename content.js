@@ -204,6 +204,7 @@ const state = {
   progressText: "", // transient status while loading the docket
   filterType: "all", // all | org | person | anon
   filterDoc: "all", // all | has | none
+  sort: "posted", // posted | name-asc | name-desc
 };
 
 let sidebarEls = null; // { countEl }
@@ -222,8 +223,26 @@ function matchesFilter(c) {
   return true;
 }
 
-function isFilterActive() {
-  return state.filterType !== "all" || state.filterDoc !== "all";
+// The takeover (our full-docket list replacing the native one) kicks in when any
+// filter OR a non-default sort is chosen — sorting by submitter name has to act
+// on the whole docket, which the native server-side list can't do.
+function isTakeoverActive() {
+  return state.filterType !== "all" || state.filterDoc !== "all" || state.sort !== "posted";
+}
+
+// Sort matches by submitter name. "posted" keeps enumeration order (postedDate).
+// Comments with no name always sort last.
+function sortMatches(arr) {
+  if (state.sort === "posted") return arr;
+  const dir = state.sort === "name-desc" ? -1 : 1;
+  return [...arr].sort((a, b) => {
+    const an = (a.name || "").toLowerCase();
+    const bn = (b.name || "").toLowerCase();
+    if (!an && !bn) return 0;
+    if (!an) return 1;
+    if (!bn) return -1;
+    return an < bn ? -dir : an > bn ? dir : 0;
+  });
 }
 
 function summaryText() {
@@ -364,7 +383,7 @@ function renderMain() {
   const pagerRow = rc.querySelector(".pagination-container");
   let mine = document.getElementById("rgcn-results");
 
-  if (!isFilterActive()) {
+  if (!isTakeoverActive()) {
     if (mine) mine.remove();
     if (cardsRow) cardsRow.style.display = "";
     if (pagerRow) pagerRow.style.display = "";
@@ -417,7 +436,7 @@ function renderMain() {
     wrap.appendChild(infoCard(state.progressText || "Loading all comments…"));
     return;
   }
-  const matches = loaded.filter(matchesFilter);
+  const matches = sortMatches(loaded.filter(matchesFilter));
   if (!matches.length) {
     wrap.appendChild(infoCard("No comments match these filters."));
     return;
@@ -428,7 +447,7 @@ function renderMain() {
 // Re-apply the takeover only if Ember disturbed it (avoids render loops from the
 // mutation observer when nothing changed).
 function reapplyIfNeeded() {
-  if (!isFilterActive()) return;
+  if (!isTakeoverActive()) return;
   const mine = document.getElementById("rgcn-results");
   const cardsRow = nativeCardsRow();
   if (!mine || (cardsRow && cardsRow.style.display !== "none")) renderMain();
@@ -506,12 +525,15 @@ function ensureSidebar() {
     <select id="rgcn-f-type"></select>
     <label style="display:block;font-size:13px;font-weight:600;margin:12px 0 4px">Submission format</label>
     <select id="rgcn-f-doc"></select>
+    <label style="display:block;font-size:13px;font-weight:600;margin:12px 0 4px">Sort by</label>
+    <select id="rgcn-sort"></select>
     <div id="rgcn-count" style="font-size:12px;color:#4a4a4a;margin-top:10px;min-height:15px"></div>
   `;
   panel.appendChild(section);
 
   const typeSel = section.querySelector("#rgcn-f-type");
   const docSel = section.querySelector("#rgcn-f-doc");
+  const sortSel = section.querySelector("#rgcn-sort");
   typeSel.innerHTML = `
     <option value="all">All</option>
     <option value="org">🏢 Organizations</option>
@@ -521,10 +543,16 @@ function ensureSidebar() {
     <option value="all">All</option>
     <option value="has">📎 Has document</option>
     <option value="none">Inline text only</option>`;
+  sortSel.innerHTML = `
+    <option value="posted">Posted (default)</option>
+    <option value="name-asc">Submitter name (A–Z)</option>
+    <option value="name-desc">Submitter name (Z–A)</option>`;
   styleNativeSelect(typeSel);
   styleNativeSelect(docSel);
+  styleNativeSelect(sortSel);
   typeSel.value = state.filterType; // restore selections after an Ember repaint
   docSel.value = state.filterDoc;
+  sortSel.value = state.sort;
 
   sidebarEls = { countEl: section.querySelector("#rgcn-count") };
 
@@ -534,6 +562,10 @@ function ensureSidebar() {
   });
   docSel.addEventListener("change", () => {
     state.filterDoc = docSel.value;
+    renderMain();
+  });
+  sortSel.addEventListener("change", () => {
+    state.sort = sortSel.value;
     renderMain();
   });
 

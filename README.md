@@ -59,8 +59,10 @@ section with two filters:
 
 - **Submitter type** — organizations / individuals / anonymous
 - **Submission format** — has a document / inline text only
+- **Sort by** — posted order (default), or submitter name A–Z / Z–A
 
-Choosing anything other than "All" **filters the main comment list in place**:
+Choosing a filter, or any sort other than "Posted", **takes over the main comment
+list in place**:
 the native (25-per-page) list and pager are hidden, the whole docket is loaded
 once, and the matching comments render as cards in the same column — each titled
 with the commenter's name and linking to the comment and its document. A summary
@@ -68,10 +70,13 @@ bar shows `<matches> match · <loaded>/<total> loaded` with **Clear filters** an
 if any loads were rate-limited, **Retry failed**. Set both filters back to "All"
 to restore the native list.
 
-Filtering happens client-side because the site paginates 25/page server-side and
-the API has no organization/attachment facet, so the extension fetches every
-comment's detail once (uses API quota; cached 30 days, so later filtering is
-instant). Dockets over 5,000 comments are capped at the first 5,000 (API limit).
+This all happens client-side because the site paginates 25/page server-side and
+the API has no organization/attachment facet — and the native "Sort by" is a
+server-side control that can't sort by submitter name (not an API sort field).
+So the extension fetches every comment's detail once (uses API quota; cached 30
+days, so later filtering/sorting is instant), then filters and sorts the full set
+in the browser. Dockets over 5,000 comments are capped at the first 5,000 (API
+limit).
 
 ## How it works
 
