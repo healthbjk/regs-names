@@ -4,7 +4,7 @@
 // across all tabs.
 
 const API_BASE = "https://api.regulations.gov/v4/comments/";
-const CACHE_PREFIX = "commenter:v3:"; // bumped: entries now include raw org + parent docId
+const CACHE_PREFIX = "commenter:v4:"; // bumped: name now falls back to the comment title
 const ORG_ENUM_CAP = 300; // max candidate ids to page through for an org search
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
@@ -79,6 +79,22 @@ async function writeCache(id, payload) {
   await chrome.storage.local.set({ [key]: { ...payload, t: Date.now() } });
 }
 
+// Org-like keywords used to guess whether a title-derived name is an
+// organization or an individual.
+const ORG_KEYWORDS =
+  /\b(inc|incorporated|corp|corporation|llc|llp|lp|ltd|co|company|companies|association|assn|coalition|alliance|federation|union|society|foundation|institute|institutes|center|centre|council|committee|board|group|partners|partnership|systems|technologies|solutions|health|healthcare|hospital|hospitals|clinic|university|college|school|department|agency|bureau|office|network|organization|organisation|chamber|fund|trust|services|laboratories|labs|pharmaceuticals|pharma|industries|holdings)\b/i;
+
+// Many comments (especially attachment-based or agency-posted ones) leave the
+// structured organization/name fields null and carry the submitter identity only
+// in an auto-generated title like "Comment Submitted by Epic Systems Corporation".
+// Recover the name from such titles; ignore the generic "Comment on <docid>" form.
+function parseTitleName(title) {
+  const t = (title || "").trim();
+  const m = t.match(/^comment\s+(?:submitted\s+by|on\s+behalf\s+of|from|of|by)\s+(.+)$/i);
+  if (!m) return "";
+  return m[1].replace(/\s+/g, " ").trim();
+}
+
 // Turn the comment attributes into a single display name + a kind hint.
 function deriveName(attr) {
   if (!attr) return { name: null, kind: null };
@@ -90,6 +106,11 @@ function deriveName(attr) {
   if (org && person) return { name: `${org} (${person})`, kind: "org" };
   if (org) return { name: org, kind: "org" };
   if (person) return { name: person, kind: "person" };
+
+  // Fall back to the comment title when the structured fields are empty.
+  const titleName = parseTitleName(attr.title);
+  if (titleName) return { name: titleName, kind: ORG_KEYWORDS.test(titleName) ? "org" : "person" };
+
   return { name: null, kind: "anon" }; // e.g. "Anonymous Anonymous" stripped, or mass/bulk submissions
 }
 

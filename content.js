@@ -110,8 +110,8 @@ function renderResult(parts, res) {
   if (res.ok) {
     renderName(name, res);
     renderBody(body, res);
-    if (res.org) {
-      const more = makeOrgLink(res.org);
+    if (res.kind === "org" && (res.org || res.name)) {
+      const more = makeOrgLink(res.org || res.name);
       more.style.cssText += ";display:inline-block;margin-top:2px";
       row.appendChild(more);
     }
@@ -358,9 +358,9 @@ function buildCard(c, opts) {
   }
   block.appendChild(meta);
 
-  // "More from this organization" — only for org submissions with a raw org name.
-  if (c.org && !(opts && opts.hideOrgLink)) {
-    const more = makeOrgLink(c.org);
+  // "More from this organization" — for org submissions (incl. title-derived).
+  if (c.kind === "org" && (c.org || c.name) && !(opts && opts.hideOrgLink)) {
+    const more = makeOrgLink(c.org || c.name);
     more.style.marginTop = "4px";
     more.style.display = "inline-block";
     block.appendChild(more);
@@ -386,11 +386,18 @@ function makeOrgLink(org) {
 const ORG_BATCH = 20; // verify candidates in small batches to stay gentle on rate limits
 
 const normOrg = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-function orgMatches(candidateOrg, term) {
-  if (!candidateOrg) return false;
-  const have = normOrg(candidateOrg);
+// Match a candidate comment against the searched org — against its resolved name
+// (which may come from the title) AND its raw organization field, so submissions
+// that only name the org in the title still verify.
+function orgMatches(res, term) {
   const want = normOrg(term);
-  return have === want || have.includes(want) || want.includes(have);
+  if (!want) return false;
+  for (const cand of [res && res.name, res && res.org]) {
+    if (!cand) continue;
+    const have = normOrg(cand);
+    if (have === want || have.includes(want) || want.includes(have)) return true;
+  }
+  return false;
 }
 
 // Look up an organization's comments across all of Regulations.gov: full-text
@@ -461,7 +468,7 @@ function verifyNextBatch() {
   batch.forEach((id) => {
     chrome.runtime.sendMessage({ type: "getCommenter", id }, (res) => {
       if (!state.org) return;
-      if (res && res.ok && orgMatches(res.org, o.term)) o.results.push({ id, ...res });
+      if (res && res.ok && orgMatches(res, o.term)) o.results.push({ id, ...res });
       if (++done === batch.length) {
         o.cursor += batch.length;
         o.loading = false;

@@ -44,6 +44,13 @@ requests are throttled with backoff to stay within those limits.
 Each comment card will gain a line like `🏢 Acme Health Systems` or
 `👤 Jane Doe`. Comments with no name show `— no name provided —`.
 
+Many submissions leave the structured `organization`/name fields blank and carry
+the submitter's identity only in the comment **title** (e.g. *"Comment Submitted
+by Epic Systems Corporation"*). When the structured fields are empty, the name is
+recovered from such a title — so those submissions show the real submitter
+instead of "no name provided." (The generic *"Comment on CMS-…"* title is
+ignored.)
+
 Below the name, each card also shows the substance of the submission:
 
 - **If the comment is an uploaded document**, a link to the attachment, e.g.
