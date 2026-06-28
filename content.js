@@ -118,6 +118,14 @@ function renderResult(parts, res) {
       e.textContent = ctx.join(" · ");
       row.appendChild(e);
     }
+    // On cross-rule lists (e.g. search results), show which rule this is on.
+    if (isCrossRule(res.docId)) {
+      const r = document.createElement("div");
+      r.style.cssText = "font-size:0.82em;color:#71767a;margin-top:2px";
+      r.appendChild(document.createTextNode("on "));
+      r.appendChild(ruleLink(res.docId));
+      row.appendChild(r);
+    }
     if (res.kind === "org" && (res.org || res.name)) {
       const more = makeOrgLink(res.org || res.name);
       more.style.cssText += ";display:inline-block;margin-top:2px";
@@ -319,6 +327,49 @@ function locationStr(c) {
   return loc;
 }
 
+// Rule-title lookup: cross-rule result lists show which rule each comment is on.
+const docTitles = {}; // docId -> rule title (null if none)
+const pendingDocs = new Set();
+
+function ruleLabel(title) {
+  return title.length > 100 ? title.slice(0, 100).trimEnd() + "…" : title;
+}
+
+function requestDocTitle(docId) {
+  if (docId in docTitles || pendingDocs.has(docId)) return;
+  pendingDocs.add(docId);
+  chrome.runtime.sendMessage({ type: "getDocTitle", docId }, (res) => {
+    pendingDocs.delete(docId);
+    docTitles[docId] = res && res.ok && res.title ? res.title : null;
+    if (docTitles[docId]) {
+      document.querySelectorAll(`a[data-rgcn-doc="${CSS.escape(docId)}"]`).forEach((el) => {
+        el.textContent = ruleLabel(docTitles[docId]);
+        el.title = docTitles[docId]; // full rule name on hover
+      });
+    }
+  });
+}
+
+// A link to the rule a comment is on; shows the doc id until the title resolves.
+function ruleLink(docId) {
+  const a = document.createElement("a");
+  a.href = `https://www.regulations.gov/document/${docId}`;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.style.cssText = "color:#005ea2";
+  a.dataset.rgcnDoc = docId;
+  a.title = docTitles[docId] || docId;
+  a.textContent = docTitles[docId] ? ruleLabel(docTitles[docId]) : docId;
+  requestDocTitle(docId);
+  return a;
+}
+
+// Only show "on <rule>" when the comment is on a *different* rule than the page
+// (i.e. a cross-rule list); on a single docket's comment list it's redundant.
+function isCrossRule(docId) {
+  return docId && docId !== currentDocId();
+}
+
 // Context bits beyond the name/body: submitter category, location, and a
 // duplicate-submissions flag (a signal of form-letter campaigns).
 function contextParts(c) {
@@ -393,15 +444,9 @@ function buildCard(c, opts) {
   if (c.duplicates > 0) parts.push(`🔁 ${c.duplicates} duplicate${c.duplicates === 1 ? "" : "s"}`);
   parts.push(`ID ${c.id}`);
   meta.appendChild(document.createTextNode(parts.join(" · ")));
-  if (c.docId) {
+  if (isCrossRule(c.docId)) {
     meta.appendChild(document.createTextNode(" · on "));
-    const dl = document.createElement("a");
-    dl.href = `https://www.regulations.gov/document/${c.docId}`;
-    dl.target = "_blank";
-    dl.rel = "noopener noreferrer";
-    dl.style.cssText = "color:#005ea2";
-    dl.textContent = c.docId;
-    meta.appendChild(dl);
+    meta.appendChild(ruleLink(c.docId));
   }
   block.appendChild(meta);
 

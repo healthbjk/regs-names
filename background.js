@@ -5,6 +5,7 @@
 
 const API_BASE = "https://api.regulations.gov/v4/comments/";
 const CACHE_PREFIX = "commenter:v5:"; // bumped: entries now include category/agency/location context
+const DOC_CACHE_PREFIX = "doctitle:v1:"; // cache of document id -> rule title
 const ORG_ENUM_CAP = 300; // max candidate ids to page through for an org search
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
@@ -211,6 +212,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     saveValidKey(msg.key).then(sendResponse);
     return true;
   }
+  if (msg.type === "getDocTitle" && msg.docId) {
+    fetchDocTitle(msg.docId).then(sendResponse);
+    return true;
+  }
   if (msg.type === "orgEnumerate" && msg.term) {
     (async () => {
       const apiKey = await getApiKey();
@@ -266,6 +271,24 @@ async function apiGetJson(url) {
   } catch (e) {
     return { ok: false, error: "parse" };
   }
+}
+
+// Fetch (and cache) a document's title — the human-readable rule name — so
+// cross-rule result lists can show what each comment pertains to.
+async function fetchDocTitle(docId) {
+  const key = DOC_CACHE_PREFIX + docId;
+  const stored = await chrome.storage.local.get(key);
+  if (stored[key] !== undefined) return { ok: true, title: stored[key] };
+  const apiKey = await getApiKey();
+  if (!apiKey) return { ok: false, error: "no-key" };
+  const url =
+    `https://api.regulations.gov/v4/documents/${encodeURIComponent(docId)}` +
+    `?api_key=${encodeURIComponent(apiKey)}`;
+  const r = await apiGetJson(url);
+  if (!r.ok) return r;
+  const title = (r.json && r.json.data && r.json.data.attributes && r.json.data.attributes.title) || null;
+  await chrome.storage.local.set({ [key]: title });
+  return { ok: true, title };
 }
 
 // The comments API filters by the document's numeric objectId, not its friendly
