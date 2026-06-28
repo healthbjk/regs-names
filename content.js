@@ -631,8 +631,8 @@ function renderOrgResults(wrap) {
   const note = document.createElement("div");
   note.style.cssText = "font-size:12px;color:#71767a;margin:10px 0";
   note.textContent =
-    `Verified ${checked} of ${o.ids.length}${o.capped ? "+" : ""} candidates (full-text search). ` +
-    "Attachment-only submissions whose text omits the name may be missing.";
+    `Verified ${checked} of ${o.ids.length}${o.capped ? "+" : ""} candidates. ` +
+    "Search covers comment text and text-based PDFs; scanned/image-only attachments (no extractable text) can be missed.";
   wrap.appendChild(note);
 
   if (o.cursor < o.ids.length) {
@@ -646,7 +646,7 @@ function renderOrgResults(wrap) {
   } else if (!o.results.length) {
     wrap.appendChild(
       infoCard(
-        "No verified submissions found among the candidates. Full-text search can miss attachment-only submissions whose text doesn't include the name."
+        "No verified submissions found among the candidates. Search covers comment text and text-based PDFs, but can miss scanned/image-only attachments."
       )
     );
   }

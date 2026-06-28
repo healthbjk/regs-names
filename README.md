@@ -91,9 +91,11 @@ against each comment's `organization` field in batches of 20**, so mere mentions
 are filtered out and the API rate limits stay comfortable. Verified submissions
 render as you go, with a **Check next 20** button to pull more on demand.
 
-One honest limit, noted in the results: **attachment-only submissions can be
-missed** — if an org uploads a PDF with body text like "See attached", the name
-isn't in the searchable text, so the search won't find it.
+Regulations.gov's search indexes both the comment text **and the extractable
+text inside attachments**, so an org that submits a text-based PDF (name on the
+letterhead/signature) is still found. The remaining gap, noted in the results,
+is narrow: **scanned or image-only PDFs** with no extractable text (no OCR), or
+submissions that left the organization field blank.
 
 ## How it works
 
