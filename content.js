@@ -383,12 +383,33 @@ function makeOrgLink(org) {
   return a;
 }
 
+const ORG_BATCH = 20; // verify candidates in small batches to stay gentle on rate limits
+
+const normOrg = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+function orgMatches(candidateOrg, term) {
+  if (!candidateOrg) return false;
+  const have = normOrg(candidateOrg);
+  const want = normOrg(term);
+  return have === want || have.includes(want) || want.includes(have);
+}
+
 // Look up an organization's comments across all of Regulations.gov: full-text
-// search for the name, then verify each candidate's organization field. (The
-// API has no org filter, so attachment-only submissions whose text lacks the
-// name can't be found — surfaced as a caveat in the results header.)
+// search for the name (cheap, one round-trip), then verify candidates against
+// their organization field in batches of 20 — the user pulls more on demand
+// rather than firing one big burst. (Attachment-only submissions whose text
+// lacks the name can't be found; surfaced as a caveat in the results.)
 function startOrgSearch(org) {
-  state.org = { term: org, loading: true, progressText: "Searching…", results: null, capped: false, candidates: 0 };
+  state.org = {
+    term: org,
+    loading: true,
+    progressText: "Searching Regulations.gov…",
+    ids: [],
+    cursor: 0,
+    total: 0,
+    capped: false,
+    results: [],
+    error: "",
+  };
   renderMain();
   try {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -396,38 +417,59 @@ function startOrgSearch(org) {
     /* ignore */
   }
 
-  const port = chrome.runtime.connect({ name: "orgsearch" });
-  port.onMessage.addListener((m) => {
+  chrome.runtime.sendMessage({ type: "orgEnumerate", term: org }, (res) => {
     if (!state.org) return;
-    if (m.type === "status") {
-      state.org.progressText = m.text;
-    } else if (m.type === "progress") {
-      state.org.progressText = `Checking ${m.loaded}/${m.total} candidates…`;
-    } else if (m.type === "done") {
+    if (chrome.runtime.lastError || !res) {
       state.org.loading = false;
-      state.org.progressText = "";
-      state.org.results = m.results || [];
-      state.org.capped = !!m.capped;
-      state.org.candidates = m.candidates || 0;
-    } else if (m.type === "error") {
+      state.org.error = "Couldn't reach the extension worker — try again.";
+      renderMain();
+      return;
+    }
+    if (!res.ok) {
       state.org.loading = false;
       const map = {
         "no-key": "Set an API key (extension icon), then reload.",
         "rate-limit": "API rate limit hit — try again shortly.",
         "bad-key": "Invalid API key.",
       };
-      state.org.progressText = map[m.error] || `Error: ${m.error}`;
-    }
-    renderMain();
-  });
-  port.onDisconnect.addListener(() => {
-    if (state.org && state.org.loading) {
-      state.org.loading = false;
-      state.org.progressText = "Search interrupted — try again.";
+      state.org.error = map[res.error] || `Error: ${res.error}`;
       renderMain();
+      return;
     }
+    state.org.ids = res.ids || [];
+    state.org.total = res.total || state.org.ids.length;
+    state.org.capped = !!res.capped;
+    verifyNextBatch();
   });
-  port.postMessage({ term: org });
+}
+
+// Verify the next batch of candidates against their organization field.
+function verifyNextBatch() {
+  const o = state.org;
+  if (!o) return;
+  const batch = o.ids.slice(o.cursor, o.cursor + ORG_BATCH);
+  if (!batch.length) {
+    o.loading = false;
+    renderMain();
+    return;
+  }
+  o.loading = true;
+  o.progressText = `Checking ${o.cursor + 1}–${o.cursor + batch.length} of ${o.ids.length} candidates…`;
+  renderMain();
+
+  let done = 0;
+  batch.forEach((id) => {
+    chrome.runtime.sendMessage({ type: "getCommenter", id }, (res) => {
+      if (!state.org) return;
+      if (res && res.ok && orgMatches(res.org, o.term)) o.results.push({ id, ...res });
+      if (++done === batch.length) {
+        o.cursor += batch.length;
+        o.loading = false;
+        o.progressText = "";
+        renderMain();
+      }
+    });
+  });
 }
 
 function exitOrgSearch() {
@@ -554,14 +596,13 @@ function renderMain() {
 // Render the cross-docket "this organization's other comments" view.
 function renderOrgResults(wrap) {
   const o = state.org;
+
   const bar = document.createElement("div");
   bar.style.cssText =
     "padding:6px 0 10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px";
-  const n = o.results ? o.results.length : 0;
+  const n = o.results.length;
   const label = document.createElement("strong");
-  label.textContent = o.loading
-    ? o.progressText || "Searching…"
-    : `${n} comment${n === 1 ? "" : "s"} by “${o.term}” across Regulations.gov`;
+  label.textContent = `${n} comment${n === 1 ? "" : "s"} by “${o.term}” so far`;
   bar.appendChild(label);
   const back = document.createElement("a");
   back.href = "#";
@@ -574,33 +615,41 @@ function renderOrgResults(wrap) {
   bar.appendChild(back);
   wrap.appendChild(bar);
 
-  if (o.loading) {
-    wrap.appendChild(infoCard(o.progressText || "Searching…"));
+  if (o.error) {
+    wrap.appendChild(infoCard(o.error));
     return;
   }
-  if (o.progressText) {
-    // an error message was left in progressText
-    wrap.appendChild(infoCard(o.progressText));
-    return;
-  }
-  if (!o.results || !o.results.length) {
-    wrap.appendChild(
-      infoCard(
-        "No verified submissions found. Full-text search can miss attachment-only submissions whose text doesn't include the name."
-      )
-    );
-    return;
-  }
-
-  const note = document.createElement("div");
-  note.style.cssText = "font-size:12px;color:#71767a;margin:0 0 10px";
-  note.textContent =
-    "Found via full-text search, then verified against each comment's organization field." +
-    (o.capped ? " This org has many comments; only the most recent batch was checked." : "") +
-    " Attachment-only submissions whose text omits the name may be missing.";
-  wrap.appendChild(note);
 
   o.results.forEach((c) => wrap.appendChild(buildCard(c, { hideOrgLink: true })));
+
+  if (o.loading) {
+    wrap.appendChild(infoCard(o.progressText || "Checking candidates…"));
+    return;
+  }
+
+  const checked = Math.min(o.cursor, o.ids.length);
+  const note = document.createElement("div");
+  note.style.cssText = "font-size:12px;color:#71767a;margin:10px 0";
+  note.textContent =
+    `Verified ${checked} of ${o.ids.length}${o.capped ? "+" : ""} candidates (full-text search). ` +
+    "Attachment-only submissions whose text omits the name may be missing.";
+  wrap.appendChild(note);
+
+  if (o.cursor < o.ids.length) {
+    const remaining = o.ids.length - o.cursor;
+    const btn = document.createElement("button");
+    btn.textContent = `Check next ${Math.min(ORG_BATCH, remaining)} (${remaining} remaining)`;
+    btn.style.cssText =
+      "padding:8px 14px;font-size:13px;font-weight:600;color:#fff;background:#005ea2;border:none;border-radius:5px;cursor:pointer";
+    btn.addEventListener("click", verifyNextBatch);
+    wrap.appendChild(btn);
+  } else if (!o.results.length) {
+    wrap.appendChild(
+      infoCard(
+        "No verified submissions found among the candidates. Full-text search can miss attachment-only submissions whose text doesn't include the name."
+      )
+    );
+  }
 }
 
 // Re-apply the takeover only if Ember disturbed it (avoids render loops from the

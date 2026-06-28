@@ -86,15 +86,14 @@ of Regulations.gov for that org's other submissions and lists them in place —
 each linking to the comment and the rule it was filed on.
 
 Because the API has **no organization field to query**, this works by full-text
-searching the org's name and then **verifying each hit against that comment's
-`organization` field**, so mere mentions are filtered out. Two honest limits,
-noted in the results header:
+searching the org's name (one cheap request) and then **verifying candidates
+against each comment's `organization` field in batches of 20**, so mere mentions
+are filtered out and the API rate limits stay comfortable. Verified submissions
+render as you go, with a **Check next 20** button to pull more on demand.
 
-- **Attachment-only submissions can be missed** — if an org uploads a PDF with
-  body text like "See attached", the name isn't in the searchable text, so the
-  search won't find it.
-- For prolific orgs, only the most recent batch of candidates is verified (to
-  respect the API rate limits), and that's stated when it happens.
+One honest limit, noted in the results: **attachment-only submissions can be
+missed** — if an org uploads a PDF with body text like "See attached", the name
+isn't in the searchable text, so the search won't find it.
 
 ## How it works
 

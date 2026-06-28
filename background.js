@@ -5,7 +5,7 @@
 
 const API_BASE = "https://api.regulations.gov/v4/comments/";
 const CACHE_PREFIX = "commenter:v3:"; // bumped: entries now include raw org + parent docId
-const ORG_SEARCH_CAP = 80; // max candidates to verify per org search (rate-limit guard)
+const ORG_ENUM_CAP = 300; // max candidate ids to page through for an org search
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
 // A transparent, static client identifier sent on every API request (no user
@@ -176,6 +176,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     saveValidKey(msg.key).then(sendResponse);
     return true;
   }
+  if (msg.type === "orgEnumerate" && msg.term) {
+    (async () => {
+      const apiKey = await getApiKey();
+      if (!apiKey) return sendResponse({ ok: false, error: "no-key" });
+      const en = await enumerateBySearchTerm(String(msg.term).trim(), apiKey, ORG_ENUM_CAP);
+      sendResponse(
+        en.ok
+          ? { ok: true, ids: en.ids, total: en.totalCandidates, capped: en.capped }
+          : { ok: false, error: en.error }
+      );
+    })();
+    return true;
+  }
 });
 
 // --- API key validation ------------------------------------------------------
@@ -258,11 +271,9 @@ async function enumerateCommentIds(objectId, apiKey) {
   return { ok: true, ids, truncated: hasNext && page > 20 };
 }
 
-const normalizeOrg = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-
 // Full-text search across all dockets for a term (used for org lookup). The API
 // has no organization field to filter on, so this is the only cross-docket
-// lever — we verify each candidate's organization afterward.
+// lever — the client then verifies each candidate's organization, in batches.
 async function enumerateBySearchTerm(term, apiKey, cap) {
   const ids = [];
   let page = 1;
@@ -284,56 +295,6 @@ async function enumerateBySearchTerm(term, apiKey, cap) {
   } while (hasNext && page <= 20 && ids.length < cap);
   return { ok: true, ids: ids.slice(0, cap), totalCandidates, capped: totalCandidates > cap };
 }
-
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== "orgsearch") return;
-  let alive = true;
-  port.onDisconnect.addListener(() => (alive = false));
-  const send = (m) => {
-    if (alive) {
-      try {
-        port.postMessage(m);
-      } catch (e) {
-        alive = false;
-      }
-    }
-  };
-
-  port.onMessage.addListener(async (msg) => {
-    const term = msg && msg.term ? String(msg.term).trim() : "";
-    if (!term) return send({ type: "error", error: "no-term" });
-    const apiKey = await getApiKey();
-    if (!apiKey) return send({ type: "error", error: "no-key" });
-
-    send({ type: "status", text: "Searching Regulations.gov…" });
-    const en = await enumerateBySearchTerm(term, apiKey, ORG_SEARCH_CAP);
-    if (!en.ok) return send({ type: "error", error: en.error });
-
-    const ids = en.ids;
-    const total = ids.length;
-    send({ type: "progress", loaded: 0, total });
-
-    const want = normalizeOrg(term);
-    const results = [];
-    let loaded = 0;
-    await Promise.all(
-      ids.map((id) =>
-        enqueue(() => fetchCommenter(id)).then((res) => {
-          loaded++;
-          if (res && res.ok && res.org) {
-            const have = normalizeOrg(res.org);
-            if (have === want || have.includes(want) || want.includes(have)) {
-              results.push({ id, ...res });
-            }
-          }
-          if (loaded % 10 === 0 || loaded === total) send({ type: "progress", loaded, total });
-        })
-      )
-    );
-
-    send({ type: "done", results, capped: !!en.capped, candidates: en.totalCandidates });
-  });
-});
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "docket") return;
