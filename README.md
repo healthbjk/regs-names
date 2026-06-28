@@ -78,6 +78,24 @@ days, so later filtering/sorting is instant), then filters and sorts the full se
 in the browser. Dockets over 5,000 comments are capped at the first 5,000 (API
 limit).
 
+### See an organization's other comments
+
+Every organization submission shows a **↪ More comments from this organization**
+link (on the comment cards and in the filtered view). Clicking it searches *all*
+of Regulations.gov for that org's other submissions and lists them in place —
+each linking to the comment and the rule it was filed on.
+
+Because the API has **no organization field to query**, this works by full-text
+searching the org's name and then **verifying each hit against that comment's
+`organization` field**, so mere mentions are filtered out. Two honest limits,
+noted in the results header:
+
+- **Attachment-only submissions can be missed** — if an org uploads a PDF with
+  body text like "See attached", the name isn't in the searchable text, so the
+  search won't find it.
+- For prolific orgs, only the most recent batch of candidates is verified (to
+  respect the API rate limits), and that's stated when it happens.
+
 ## How it works
 
 - `content.js` finds `a[href*="/comment/"]` cards, extracts the comment ID, and

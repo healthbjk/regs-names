@@ -110,6 +110,11 @@ function renderResult(parts, res) {
   if (res.ok) {
     renderName(name, res);
     renderBody(body, res);
+    if (res.org) {
+      const more = makeOrgLink(res.org);
+      more.style.cssText += ";display:inline-block;margin-top:2px";
+      row.appendChild(more);
+    }
     return;
   }
   // error states
@@ -205,6 +210,7 @@ const state = {
   filterType: "all", // all | org | person | anon
   filterDoc: "all", // all | has | none
   sort: "posted", // posted | name-asc | name-desc
+  org: null, // when set: { term, loading, progressText, results, capped, candidates } — cross-docket org lookup
 };
 
 let sidebarEls = null; // { countEl }
@@ -227,7 +233,12 @@ function matchesFilter(c) {
 // filter OR a non-default sort is chosen — sorting by submitter name has to act
 // on the whole docket, which the native server-side list can't do.
 function isTakeoverActive() {
-  return state.filterType !== "all" || state.filterDoc !== "all" || state.sort !== "posted";
+  return (
+    !!state.org ||
+    state.filterType !== "all" ||
+    state.filterDoc !== "all" ||
+    state.sort !== "posted"
+  );
 }
 
 // Sort matches by submitter name. "posted" keeps enumeration order (postedDate).
@@ -283,7 +294,7 @@ function retryFailed() {
 
 // Build a card that reuses the site's own card classes, so the existing
 // stylesheet renders it identically to a native comment card.
-function buildCard(c) {
+function buildCard(c, opts) {
   const card = document.createElement("div");
   card.className = "card card-type-comment";
   card.style.marginBottom = "12px";
@@ -335,10 +346,93 @@ function buildCard(c) {
   meta.className = "card-metadata";
   meta.style.cssText = "margin-top:4px;font-size:12px;color:#71767a";
   meta.textContent = `ID ${c.id}`;
+  if (c.docId) {
+    meta.appendChild(document.createTextNode(" · on "));
+    const dl = document.createElement("a");
+    dl.href = `https://www.regulations.gov/document/${c.docId}`;
+    dl.target = "_blank";
+    dl.rel = "noopener noreferrer";
+    dl.style.cssText = "color:#005ea2";
+    dl.textContent = c.docId;
+    meta.appendChild(dl);
+  }
   block.appendChild(meta);
+
+  // "More from this organization" — only for org submissions with a raw org name.
+  if (c.org && !(opts && opts.hideOrgLink)) {
+    const more = makeOrgLink(c.org);
+    more.style.marginTop = "4px";
+    more.style.display = "inline-block";
+    block.appendChild(more);
+  }
 
   card.appendChild(block);
   return card;
+}
+
+// A link that runs a cross-docket lookup for an organization's other comments.
+function makeOrgLink(org) {
+  const a = document.createElement("a");
+  a.href = "#";
+  a.textContent = "↪ More comments from this organization";
+  a.style.cssText = "color:#005ea2;font-size:0.85em";
+  a.addEventListener("click", (e) => {
+    e.preventDefault();
+    startOrgSearch(org);
+  });
+  return a;
+}
+
+// Look up an organization's comments across all of Regulations.gov: full-text
+// search for the name, then verify each candidate's organization field. (The
+// API has no org filter, so attachment-only submissions whose text lacks the
+// name can't be found — surfaced as a caveat in the results header.)
+function startOrgSearch(org) {
+  state.org = { term: org, loading: true, progressText: "Searching…", results: null, capped: false, candidates: 0 };
+  renderMain();
+  try {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (e) {
+    /* ignore */
+  }
+
+  const port = chrome.runtime.connect({ name: "orgsearch" });
+  port.onMessage.addListener((m) => {
+    if (!state.org) return;
+    if (m.type === "status") {
+      state.org.progressText = m.text;
+    } else if (m.type === "progress") {
+      state.org.progressText = `Checking ${m.loaded}/${m.total} candidates…`;
+    } else if (m.type === "done") {
+      state.org.loading = false;
+      state.org.progressText = "";
+      state.org.results = m.results || [];
+      state.org.capped = !!m.capped;
+      state.org.candidates = m.candidates || 0;
+    } else if (m.type === "error") {
+      state.org.loading = false;
+      const map = {
+        "no-key": "Set an API key (extension icon), then reload.",
+        "rate-limit": "API rate limit hit — try again shortly.",
+        "bad-key": "Invalid API key.",
+      };
+      state.org.progressText = map[m.error] || `Error: ${m.error}`;
+    }
+    renderMain();
+  });
+  port.onDisconnect.addListener(() => {
+    if (state.org && state.org.loading) {
+      state.org.loading = false;
+      state.org.progressText = "Search interrupted — try again.";
+      renderMain();
+    }
+  });
+  port.postMessage({ term: org });
+}
+
+function exitOrgSearch() {
+  state.org = null;
+  renderMain();
 }
 
 function infoCard(text) {
@@ -374,8 +468,16 @@ function resetFilters() {
 
 // When a filter is active, hide the native list/pager and render the filtered
 // full-docket matches in their place; otherwise restore the native list.
+function orgSummaryText() {
+  const o = state.org;
+  if (!o) return "";
+  if (o.loading) return o.progressText || "Searching…";
+  const n = o.results ? o.results.length : 0;
+  return `${n} by “${o.term}”`;
+}
+
 function renderMain() {
-  if (sidebarEls) sidebarEls.countEl.textContent = summaryText();
+  if (sidebarEls) sidebarEls.countEl.textContent = state.org ? orgSummaryText() : summaryText();
 
   const rc = document.querySelector(".results-container");
   if (!rc) return;
@@ -404,6 +506,11 @@ function renderMain() {
   const wrap = document.createElement("div");
   wrap.className = "col-md-12";
   mine.appendChild(wrap);
+
+  if (state.org) {
+    renderOrgResults(wrap);
+    return;
+  }
 
   // Summary bar: count, clear-filters, and a retry if any loads failed.
   const bar = document.createElement("div");
@@ -442,6 +549,58 @@ function renderMain() {
     return;
   }
   matches.forEach((c) => wrap.appendChild(buildCard(c)));
+}
+
+// Render the cross-docket "this organization's other comments" view.
+function renderOrgResults(wrap) {
+  const o = state.org;
+  const bar = document.createElement("div");
+  bar.style.cssText =
+    "padding:6px 0 10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px";
+  const n = o.results ? o.results.length : 0;
+  const label = document.createElement("strong");
+  label.textContent = o.loading
+    ? o.progressText || "Searching…"
+    : `${n} comment${n === 1 ? "" : "s"} by “${o.term}” across Regulations.gov`;
+  bar.appendChild(label);
+  const back = document.createElement("a");
+  back.href = "#";
+  back.textContent = "← Back to docket";
+  back.style.cssText = "color:#005ea2;font-size:12px";
+  back.addEventListener("click", (e) => {
+    e.preventDefault();
+    exitOrgSearch();
+  });
+  bar.appendChild(back);
+  wrap.appendChild(bar);
+
+  if (o.loading) {
+    wrap.appendChild(infoCard(o.progressText || "Searching…"));
+    return;
+  }
+  if (o.progressText) {
+    // an error message was left in progressText
+    wrap.appendChild(infoCard(o.progressText));
+    return;
+  }
+  if (!o.results || !o.results.length) {
+    wrap.appendChild(
+      infoCard(
+        "No verified submissions found. Full-text search can miss attachment-only submissions whose text doesn't include the name."
+      )
+    );
+    return;
+  }
+
+  const note = document.createElement("div");
+  note.style.cssText = "font-size:12px;color:#71767a;margin:0 0 10px";
+  note.textContent =
+    "Found via full-text search, then verified against each comment's organization field." +
+    (o.capped ? " This org has many comments; only the most recent batch was checked." : "") +
+    " Attachment-only submissions whose text omits the name may be missing.";
+  wrap.appendChild(note);
+
+  o.results.forEach((c) => wrap.appendChild(buildCard(c, { hideOrgLink: true })));
 }
 
 // Re-apply the takeover only if Ember disturbed it (avoids render loops from the
@@ -557,14 +716,17 @@ function ensureSidebar() {
   sidebarEls = { countEl: section.querySelector("#rgcn-count") };
 
   typeSel.addEventListener("change", () => {
+    state.org = null; // a docket filter exits the cross-docket org view
     state.filterType = typeSel.value;
     renderMain();
   });
   docSel.addEventListener("change", () => {
+    state.org = null;
     state.filterDoc = docSel.value;
     renderMain();
   });
   sortSel.addEventListener("change", () => {
+    state.org = null;
     state.sort = sortSel.value;
     renderMain();
   });

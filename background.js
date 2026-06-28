@@ -4,7 +4,8 @@
 // across all tabs.
 
 const API_BASE = "https://api.regulations.gov/v4/comments/";
-const CACHE_PREFIX = "commenter:v2:"; // bumped: entries now include text + attachments
+const CACHE_PREFIX = "commenter:v3:"; // bumped: entries now include raw org + parent docId
+const ORG_SEARCH_CAP = 80; // max candidates to verify per org search (rate-limit guard)
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
 // A transparent, static client identifier sent on every API request (no user
@@ -150,7 +151,9 @@ async function fetchCommenter(id) {
   const attr = json && json.data && json.data.attributes;
   const { name, kind } = deriveName(attr);
   const { text, attachments } = deriveContent(json);
-  const payload = { name, kind, text, attachments };
+  const org = attr && attr.organization ? String(attr.organization).trim() : "";
+  const docId = (attr && attr.commentOnDocumentId) || null;
+  const payload = { name, kind, text, attachments, org, docId };
   await writeCache(id, payload);
   return { ok: true, ...payload, cached: false };
 }
@@ -254,6 +257,83 @@ async function enumerateCommentIds(objectId, apiKey) {
   } while (hasNext && page <= 20); // API caps page[number] at 20 (5000 comments)
   return { ok: true, ids, truncated: hasNext && page > 20 };
 }
+
+const normalizeOrg = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+// Full-text search across all dockets for a term (used for org lookup). The API
+// has no organization field to filter on, so this is the only cross-docket
+// lever — we verify each candidate's organization afterward.
+async function enumerateBySearchTerm(term, apiKey, cap) {
+  const ids = [];
+  let page = 1;
+  let hasNext = false;
+  let totalCandidates = 0;
+  const q = `"${String(term).replace(/"/g, "")}"`; // quoted phrase
+  do {
+    const url =
+      `https://api.regulations.gov/v4/comments?filter[searchTerm]=${encodeURIComponent(q)}` +
+      `&page[size]=250&page[number]=${page}&sort=postedDate&api_key=${encodeURIComponent(apiKey)}`;
+    const r = await apiGetJson(url);
+    if (!r.ok) return r;
+    const data = r.json && Array.isArray(r.json.data) ? r.json.data : [];
+    for (const d of data) if (d && d.id) ids.push(d.id);
+    const meta = (r.json && r.json.meta) || {};
+    totalCandidates = meta.totalElements || ids.length;
+    hasNext = meta.hasNextPage === true || data.length >= 250;
+    page++;
+  } while (hasNext && page <= 20 && ids.length < cap);
+  return { ok: true, ids: ids.slice(0, cap), totalCandidates, capped: totalCandidates > cap };
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "orgsearch") return;
+  let alive = true;
+  port.onDisconnect.addListener(() => (alive = false));
+  const send = (m) => {
+    if (alive) {
+      try {
+        port.postMessage(m);
+      } catch (e) {
+        alive = false;
+      }
+    }
+  };
+
+  port.onMessage.addListener(async (msg) => {
+    const term = msg && msg.term ? String(msg.term).trim() : "";
+    if (!term) return send({ type: "error", error: "no-term" });
+    const apiKey = await getApiKey();
+    if (!apiKey) return send({ type: "error", error: "no-key" });
+
+    send({ type: "status", text: "Searching Regulations.gov…" });
+    const en = await enumerateBySearchTerm(term, apiKey, ORG_SEARCH_CAP);
+    if (!en.ok) return send({ type: "error", error: en.error });
+
+    const ids = en.ids;
+    const total = ids.length;
+    send({ type: "progress", loaded: 0, total });
+
+    const want = normalizeOrg(term);
+    const results = [];
+    let loaded = 0;
+    await Promise.all(
+      ids.map((id) =>
+        enqueue(() => fetchCommenter(id)).then((res) => {
+          loaded++;
+          if (res && res.ok && res.org) {
+            const have = normalizeOrg(res.org);
+            if (have === want || have.includes(want) || want.includes(have)) {
+              results.push({ id, ...res });
+            }
+          }
+          if (loaded % 10 === 0 || loaded === total) send({ type: "progress", loaded, total });
+        })
+      )
+    );
+
+    send({ type: "done", results, capped: !!en.capped, candidates: en.totalCandidates });
+  });
+});
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "docket") return;
