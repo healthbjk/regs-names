@@ -110,6 +110,14 @@ function renderResult(parts, res) {
   if (res.ok) {
     renderName(name, res);
     renderBody(body, res);
+    // Extra context the native card doesn't show (it already lists agency/date/ID).
+    const ctx = contextParts(res);
+    if (ctx.length) {
+      const e = document.createElement("div");
+      e.style.cssText = "font-size:0.82em;color:#71767a;margin-top:2px";
+      e.textContent = ctx.join(" · ");
+      row.appendChild(e);
+    }
     if (res.kind === "org" && (res.org || res.name)) {
       const more = makeOrgLink(res.org || res.name);
       more.style.cssText += ";display:inline-block;margin-top:2px";
@@ -292,6 +300,36 @@ function retryFailed() {
 
 // --- Rendering filtered cards into the main column ---------------------------
 
+function formatDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  // Posted dates are stored at 04:00Z (midnight ET); format in UTC to avoid an
+  // off-by-one in timezones west of Eastern.
+  return isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function locationStr(c) {
+  const loc = [c.city, c.state].filter(Boolean).join(", ");
+  // include country only when it's set and not the US (the common default)
+  if (c.country && !/^(us|usa|united states)$/i.test(c.country)) {
+    return loc ? `${loc}, ${c.country}` : c.country;
+  }
+  return loc;
+}
+
+// Context bits beyond the name/body: submitter category, location, and a
+// duplicate-submissions flag (a signal of form-letter campaigns).
+function contextParts(c) {
+  const parts = [];
+  if (c.category) parts.push(c.category);
+  const loc = locationStr(c);
+  if (loc) parts.push(`📍 ${loc}`);
+  if (c.duplicates > 0) parts.push(`🔁 ${c.duplicates} duplicate${c.duplicates === 1 ? "" : "s"}`);
+  return parts;
+}
+
 // Build a card that reuses the site's own card classes, so the existing
 // stylesheet renders it identically to a native comment card.
 function buildCard(c, opts) {
@@ -345,7 +383,16 @@ function buildCard(c, opts) {
   const meta = document.createElement("div");
   meta.className = "card-metadata";
   meta.style.cssText = "margin-top:4px;font-size:12px;color:#71767a";
-  meta.textContent = `ID ${c.id}`;
+  const parts = [];
+  if (c.category) parts.push(c.category);
+  if (c.agencyId) parts.push(c.agencyId);
+  const dt = formatDate(c.postedDate);
+  if (dt) parts.push(`Posted ${dt}`);
+  const loc = locationStr(c);
+  if (loc) parts.push(`📍 ${loc}`);
+  if (c.duplicates > 0) parts.push(`🔁 ${c.duplicates} duplicate${c.duplicates === 1 ? "" : "s"}`);
+  parts.push(`ID ${c.id}`);
+  meta.appendChild(document.createTextNode(parts.join(" · ")));
   if (c.docId) {
     meta.appendChild(document.createTextNode(" · on "));
     const dl = document.createElement("a");

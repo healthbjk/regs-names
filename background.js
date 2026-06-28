@@ -4,7 +4,7 @@
 // across all tabs.
 
 const API_BASE = "https://api.regulations.gov/v4/comments/";
-const CACHE_PREFIX = "commenter:v4:"; // bumped: name now falls back to the comment title
+const CACHE_PREFIX = "commenter:v5:"; // bumped: entries now include category/agency/location context
 const ORG_ENUM_CAP = 300; // max candidate ids to page through for an org search
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
@@ -174,7 +174,21 @@ async function fetchCommenter(id) {
   const { text, attachments } = deriveContent(json);
   const org = attr && attr.organization ? String(attr.organization).trim() : "";
   const docId = (attr && attr.commentOnDocumentId) || null;
-  const payload = { name, kind, text, attachments, org, docId };
+  const payload = {
+    name,
+    kind,
+    text,
+    attachments,
+    org,
+    docId,
+    category: (attr && attr.category) || null,
+    agencyId: (attr && attr.agencyId) || null,
+    postedDate: (attr && attr.postedDate) || null,
+    city: (attr && attr.city) || null,
+    state: (attr && attr.stateProvinceRegion) || null,
+    country: (attr && attr.country) || null,
+    duplicates: (attr && attr.duplicateComments) || 0,
+  };
   await writeCache(id, payload);
   return { ok: true, ...payload, cached: false };
 }
