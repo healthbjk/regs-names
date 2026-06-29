@@ -216,6 +216,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     fetchDocTitle(msg.docId).then(sendResponse);
     return true;
   }
+  if (msg.type === "getAgencies") {
+    fetchAgencies().then(sendResponse);
+    return true;
+  }
   if (msg.type === "orgEnumerate" && msg.term) {
     (async () => {
       const apiKey = await getApiKey();
@@ -271,6 +275,26 @@ async function apiGetJson(url) {
   } catch (e) {
     return { ok: false, error: "parse" };
   }
+}
+
+// Fetch (and cache for the session) the agency code -> full name map, so the
+// terse agencyId (e.g. "CMS") can be shown as "Centers for Medicare&Medicaid
+// Services". Cached in storage with a 30-day TTL.
+const AGENCY_CACHE_KEY = "agencyMap:v1";
+async function fetchAgencies() {
+  const stored = await chrome.storage.local.get(AGENCY_CACHE_KEY);
+  const entry = stored[AGENCY_CACHE_KEY];
+  if (entry && Date.now() - entry.t < CACHE_TTL_MS) return { ok: true, map: entry.map };
+  const apiKey = await getApiKey();
+  if (!apiKey) return { ok: false, error: "no-key" };
+  const r = await apiGetJson(`https://api.regulations.gov/v4/agencies?api_key=${encodeURIComponent(apiKey)}`);
+  if (!r.ok) return r;
+  const map = {};
+  for (const a of (r.json && r.json.data) || []) {
+    if (a && a.id && a.attributes && a.attributes.name) map[a.id] = a.attributes.name;
+  }
+  await chrome.storage.local.set({ [AGENCY_CACHE_KEY]: { map, t: Date.now() } });
+  return { ok: true, map };
 }
 
 // Fetch (and cache) a document's title — the human-readable rule name — so

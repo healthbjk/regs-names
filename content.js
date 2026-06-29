@@ -327,6 +327,24 @@ function locationStr(c) {
   return loc;
 }
 
+// Agency code -> full name (e.g. "CMS" -> "Centers for Medicare&Medicaid
+// Services"), loaded once and cached in the background.
+let agencyMap = null;
+function loadAgencyMap() {
+  if (agencyMap) return;
+  agencyMap = {}; // mark as requested
+  chrome.runtime.sendMessage({ type: "getAgencies" }, (res) => {
+    if (res && res.ok && res.map) {
+      agencyMap = res.map;
+      renderMain(); // refresh any rendered cards with full names
+    }
+  });
+}
+function agencyName(code) {
+  if (!code) return "";
+  return (agencyMap && agencyMap[code]) || code;
+}
+
 // Rule-title lookup: cross-rule result lists show which rule each comment is on.
 const docTitles = {}; // docId -> rule title (null if none)
 const pendingDocs = new Set();
@@ -436,7 +454,7 @@ function buildCard(c, opts) {
   meta.style.cssText = "margin-top:4px;font-size:12px;color:#71767a";
   const parts = [];
   if (c.category) parts.push(c.category);
-  if (c.agencyId) parts.push(c.agencyId);
+  if (c.agencyId) parts.push(agencyName(c.agencyId));
   const dt = formatDate(c.postedDate);
   if (dt) parts.push(`Posted ${dt}`);
   const loc = locationStr(c);
@@ -633,6 +651,7 @@ function renderMain() {
     return;
   }
 
+  loadAgencyMap(); // our cards show the full agency name
   if (!state.comments && !state.loading) loadDocket();
   if (cardsRow) cardsRow.style.display = "none";
   if (pagerRow) pagerRow.style.display = "none";
